@@ -97,6 +97,7 @@
     const sameYear = y === new Date().getFullYear();
     return dt.toLocaleDateString(undefined, sameYear ? { weekday: 'short', day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
   }
+  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const ordinal = (n) => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'));
 
   const ICON = {
@@ -501,6 +502,7 @@
     switch (t.type) {
       case 'refill': desc = `Refill to ${money(t.amount)}${t.day ? ` by the ${ordinal(t.day)}` : ''} each month`; break;
       case 'monthly': desc = `${money(t.amount)} every month`; break;
+      case 'weekly': desc = `${money(t.amount)} every ${WEEKDAYS[t.day | 0]} (${ti.weeks} ${WEEKDAYS[t.day | 0]}s this month)`; break;
       case 'due': desc = ti.done ? 'Due date has passed' : `${money(t.amount)} due ${dueText(t, ti)}`; break;
       case 'goal': desc = `${Math.round(ti.pct * 100)}% of ${money(t.amount)}${t.by ? ` by ${monthLabel(E.monthOf(t.by), true)}` : ''}${ti.spent ? ` · ${money(ti.spent)} already spent from it` : ''}`; break;
       case 'cap': desc = `${money(t.amount)} a month until it holds ${money(t.cap)}`; break;
@@ -952,6 +954,7 @@
 
   const TTYPES = [
     ['refill', 'Bill that refills', 'Tops up to the same amount each month, ready for a bill that empties it. Good for phone, internet, rent.'],
+    ['weekly', 'Set aside every week', 'The same amount each week on the day you choose. Months with five of that day ask for five lots. Good for groceries and pocket money.'],
     ['monthly', 'Set aside every month', 'Adds the same amount every month, no matter how much is already there.'],
     ['due', 'Payment due on a date', 'A set amount due on a date, once or repeating (quarterly, yearly). Splits it into monthly amounts.'],
     ['goal', 'Savings goal', 'Save toward a total. Money you spend from it still counts toward the goal. Add a date to get a monthly amount.'],
@@ -979,6 +982,7 @@
     switch (type) {
       case 'refill': return amt('t-amount', 'Refill to', t.amount) + `<div class="field"><label for="t-day">Bill is due on day (optional)</label><input id="t-day" type="number" min="1" max="31" inputmode="numeric" value="${t.day || ''}" placeholder="e.g. 19"></div>`;
       case 'monthly': return amt('t-amount', 'Amount each month', t.amount);
+      case 'weekly': { const wd = t.type === 'weekly' ? t.day | 0 : 5; return amt('t-amount', 'Amount each week', t.amount) + `<div class="field"><label for="t-wday">Every</label><select id="t-wday">${WEEKDAYS.map((l, v) => [v, l]).slice(1).concat([[0, WEEKDAYS[0]]]).map(([v, l]) => `<option value="${v}" ${wd === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`; }
       case 'due': return amt('t-amount', 'Amount due', t.amount) + `<div class="field"><label for="t-due">Next due date</label><input id="t-due" type="date" value="${t.due || ''}"></div>
         <div class="field"><label for="t-every">Repeats</label><select id="t-every">${[[0, 'Does not repeat'], [1, 'Every month'], [2, 'Every 2 months'], [3, 'Every 3 months (quarterly)'], [4, 'Every 4 months'], [6, 'Every 6 months'], [12, 'Every year']].map(([v, l]) => `<option value="${v}" ${(t.every | 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
       case 'goal': return amt('t-amount', 'Goal total', t.amount) + `<div class="field"><label for="t-by">Reach it by (optional)</label><input id="t-by" type="date" value="${t.by || ''}"></div>`;
@@ -993,6 +997,7 @@
     if (!(amount > 0)) { toast('Enter an amount for the target.'); return null; }
     const t = { type, amount };
     if (type === 'refill') { const d = parseInt(($('#t-day') || {}).value, 10); if (d >= 1 && d <= 31) t.day = d; }
+    if (type === 'weekly') t.day = parseInt($('#t-wday').value, 10) || 0;
     if (type === 'due') { t.due = $('#t-due').value; t.every = parseInt($('#t-every').value, 10) || 0; if (!t.due) { toast('Choose the date it is due.'); return null; } }
     if (type === 'goal') { if ($('#t-by').value) t.by = $('#t-by').value; }
     if (type === 'cap') { t.cap = E.parseMoney($('#t-cap').value); if (!(t.cap > 0)) { toast('Enter the limit to build up to.'); return null; } }
@@ -1004,12 +1009,13 @@
     const type = ($('input[name="ttype"]:checked') || {}).value;
     const amount = E.parseMoney(($('#t-amount') || {}).value);
     if (!type || !(amount > 0)) { el.textContent = ''; return; }
-    const t = { type, amount, due: ($('#t-due') || {}).value, every: parseInt(($('#t-every') || {}).value, 10) || 0, by: ($('#t-by') || {}).value, cap: E.parseMoney(($('#t-cap') || {}).value) || 0 };
+    const t = { type, amount, due: ($('#t-due') || {}).value, every: parseInt(($('#t-every') || {}).value, 10) || 0, by: ($('#t-by') || {}).value, cap: E.parseMoney(($('#t-cap') || {}).value) || 0, day: parseInt(($('#t-wday') || {}).value, 10) || 0 };
     const ti = E.targetInfo(t, D.tree.isPot(id) ? D.month.roll[id] : D.month.rows[id], UI.month);
     if (!ti) { el.textContent = ''; return; }
     let s;
     if (type === 'goal' && !t.by) s = `Progress so far: ${money(ti.funded)} of ${money(amount)}. No monthly amount until you add a date.`;
     else if (ti.done) s = 'That date is in the past.';
+    else if (type === 'weekly') s = `This month has ${ti.weeks} ${WEEKDAYS[t.day]}s, so it needs ${money(ti.need)}${ti.under !== ti.need ? `, and ${money(ti.under)} of that is still to assign` : ''}.`;
     else s = `This month it needs ${money(ti.need)}${ti.under !== ti.need ? `, and ${money(ti.under)} of that is still to assign` : ''}.`;
     el.textContent = s;
   }
