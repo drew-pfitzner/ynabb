@@ -612,7 +612,7 @@
     const seen = {};
     const used = new Set();
     const candidates = existing.filter((t) => !t.ik);
-    return rows.map((r) => {
+    const out = rows.map((r) => {
       let ik;
       if (r.fitid) ik = acctId + '|f|' + r.fitid;
       else {
@@ -640,10 +640,17 @@
         if (same && same.amt !== r.amt && rows.some((o) => o !== r && o.amt === same.amt && shopKey(o.desc) === shopKey(same.bank))) same = null;
         if (same) { used.add(same.id); return Object.assign({}, r, { ik, status: 'update', updateId: same.id, amtFrom: same.amt !== r.amt ? same.amt : undefined }); }
       }
-      let best = null, bestGap = 99;
+      return Object.assign({}, r, { ik, status: 'new' });
+    });
+    // Match bank lines to entries typed by hand. Every possible pair is scored first, and the closest pairs are taken first
+    // across the whole file: going line by line, an earlier $4.60 could take the entry that belongs to a later $4.60
+    // a few days away, leaving the right line to come in as a double.
+    const pairs = [];
+    out.forEach((r, i) => {
+      if (r.status !== 'new') return;
       const rDM = dayMonth(r.desc), rShop = shopKey(r.desc);
       for (const t of candidates) {
-        if (used.has(t.id) || t.amt !== r.amt) continue;
+        if (t.amt !== r.amt) continue;
         const gap = Math.abs((Date.parse(t.date) - Date.parse(r.date)) / 864e5);
         // the entry's own note or bank text may name its date ("POS 26/06 BOOST"): a different date means a different purchase
         const told = (t.bank || '') + ' ' + (t.memo || '');
@@ -656,11 +663,17 @@
         // the payee's name showing up in the bank description beats a closer date (Target $20 vs Kmart $20)
         const pk = String(t.payee || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
         if (pk.length >= 3 && rShop.indexOf(pk.slice(0, 6)) >= 0) score -= 3;
-        if (score < bestGap) { best = t; bestGap = score; }
+        pairs.push({ i, t, score });
       }
-      if (best) { used.add(best.id); return Object.assign({}, r, { ik, status: 'match', matchId: best.id }); }
-      return Object.assign({}, r, { ik, status: 'new' });
     });
+    pairs.sort((x, y) => x.score - y.score || x.i - y.i);
+    const done = new Set();
+    for (const p of pairs) {
+      if (done.has(p.i) || used.has(p.t.id)) continue;
+      done.add(p.i); used.add(p.t.id);
+      out[p.i] = Object.assign({}, out[p.i], { status: 'match', matchId: p.t.id });
+    }
+    return out;
   }
 
   const api = {
