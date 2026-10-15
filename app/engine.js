@@ -111,6 +111,12 @@
   }
 
   // ---------- targets ----------
+  // how many times a weekday (0 Sunday … 6 Saturday) falls in month M
+  function weekdaysIn(M, wd) {
+    const [y, m] = M.split('-').map(Number);
+    const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(), days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return Math.floor((days - 1 - ((wd - first + 7) % 7)) / 7) + 1;
+  }
   // r = {carry, assigned, activity, available, assignedBefore}
   function targetInfo(t, r, M) {
     if (!t || !t.type) return null;
@@ -123,6 +129,12 @@
       case 'monthly': // always set aside this much each month
         need = amt;
         break;
+      case 'weekly': { // this much every week on one weekday, so a month with five Fridays asks for five lots
+        const n = weekdaysIn(M, t.day | 0);
+        need = amt * n;
+        info = { weeks: n };
+        break;
+      }
       case 'due': { // a payment due on a date, optionally repeating every N months
         if (!t.due) return null;
         let dm = monthOf(t.due);
@@ -382,6 +394,7 @@
     const amt = Math.max(0, t.amount | 0);
     switch (t.type) {
       case 'refill': case 'monthly': case 'cap': return amt;
+      case 'weekly': return Math.ceil(amt * 52 / 12);
       case 'due': {
         if ((t.every | 0) > 0) return Math.ceil(amt / t.every);
         if (!t.due) return 0;
