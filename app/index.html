@@ -7,8 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="YNABB">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#FAF5EE" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1B1714" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FAF5EE">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 50 L50 4 A46 46 0 0 1 73 89.84 Z' fill='%232A7F98'/%3E%3Cpath d='M50 50 L73 89.84 A46 46 0 0 1 4.69 57.99 Z' fill='%2378AFC0'/%3E%3Cpath d='M50 50 L4.69 57.99 A46 46 0 0 1 50 4 Z' fill='%23EA9805'/%3E%3Cpath d='M50 50 L50 4 M50 50 L73 89.84 M50 50 L4.69 57.99' stroke='%23FFFFFF' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,6 +16,7 @@
 /* the claude.ai wrapper used to supply this; without it the hidden lightbox blocks clicks */
 [hidden] { display: none !important; }
 :root {
+  color-scheme: light;
   /* palette: Colour Palette 2.png */
   --bg: #FAF5EE;
   --surface: #FFFDF9;
@@ -50,18 +50,7 @@
   --head-bg: #EFE6D7;
   --head-bg-2: #E9DFCE;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --head-bg: #28231E; --head-bg-2: #2D2722;
-    --bg: #1B1714; --surface: #231E1A; --surface-2: #2D2722; --ink: #F1EEE8; --muted: #B8ADA2; --line: #3D352E;
-    --accent: #5DB3CF; --accent-ink: #0D2630; --accent-soft: #1D3A45; --brand: #F39A3A;
-    --good: #9BCB5B; --good-soft: #26341A; --warn: #F6B44A; --warn-soft: #3A2A12; --need: #F6B44A;
-    --bad: #F07A68; --bad-soft: #3E1D1A; --on-bad: #2A0A08; --goal: #D9A0CF; --goal-soft: #3A2236;
-    --spent: #8A7792; --xfer: #8FA6E0;
-    --rta-pos: #4A7317; --rta-neg: #A8261E; --rta-zero: #2F4A80; --shadow: 0 10px 40px rgba(0,0,0,.5);
-  }
-}
+/* the app always uses the light colours, whatever the device is set to; these dark ones are kept for a future switch */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --head-bg: #28231E; --head-bg-2: #2D2722;

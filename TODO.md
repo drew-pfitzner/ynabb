@@ -22,6 +22,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-15: **Always the same colours (Dani).** The app no longer switches to dark colours when a phone, iPad or Mac is in dark mode, so everyone sees the same budget, bars included. The dark colours are kept in the code but switched off.
 - 2026-10-15: **Bar colours on older browsers (Dani).** On older Safari (iPads and Macs not updated since 2022), the budget bars had no green, orange or purple because those browsers skip one kind of colour rule. They now get plain backup colours, as do highlighted transaction rows.
 - 2026-10-15: **Weekly targets (Dani).** A new 'Set aside every week' target: an amount and a day (e.g. $50 every Friday). Each month it asks for that amount times how many of that day the month has, so a month with five Fridays asks for five lots.
 - 2026-10-15: **A prettier, story-told guide (Dani).** The guide tells Lizzy's 1970 payday story with animated cash, envelopes and calendars: every dollar gets a job, the simple sum, only spending what you've got, big non-monthly costs, rolling with the punches, paying off debt and getting a month ahead. Soft chapter colours, sticky notes and handwritten labels; Back sits at the top. Setup groups envelopes into Needs, Wants and Freedom, and amounts can be weekly to yearly or Custom (a next due date that repeats, saved as a 'payment due on a date' target).

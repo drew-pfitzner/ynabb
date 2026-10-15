@@ -59,7 +59,7 @@ These claude.ai copies still carry the old YABB titles. All four run the same co
 **Other**
 - YNAB import from YNAB's export zip, including history, assignments and "moves".
 - A step-by-step setup guide and lessons (`guide.js`), and a phone layout toggle.
-- Backup and restore (JSON), transactions CSV export, and a light/dark theme.
+- Backup and restore (JSON), transactions CSV export, and one light colour scheme (it no longer follows the device's dark mode, so everyone sees the same colours).
 
 ## Timeline
 
