@@ -1174,7 +1174,14 @@
     const av = availOf(id);
     if (id === INCOME) { if (av < 0) { to = INCOME; amount = -av; } else { from = INCOME; } }
     else if (av < 0) { to = id; amount = -av; from = D.tree.source(id) || ''; }
-    else from = id;
+    else {
+      // tapping a category means putting money into it: from its group if it has one, otherwise Ready to Assign,
+      // and as much as its target still asks for. The swap button turns it round to take money out.
+      to = id;
+      from = D.tree.source(id) || (availOf(INCOME) > 0 ? INCOME : '');
+      const ti = D.month.rows[id] && D.month.rows[id].target;
+      amount = ti && ti.under > 0 ? ti.under : 0;
+    }
     openSheet({
       title: av < 0 && id !== INCOME ? 'Cover overspending' : 'Move money',
       body: `<div class="move">
@@ -1206,7 +1213,7 @@
       $('#mv-go').textContent = `Move ${money(a)}`;
     };
     preview();
-    setTimeout(() => (amount ? $('#mv-from') : $('#mv-amt')).focus(), 50);
+    setTimeout(() => (amount && !from ? $('#mv-from') : $('#mv-amt')).focus(), 50);
     sheet.onInput = preview;
     sheet.onChange = preview;
     sheet.actions = {
