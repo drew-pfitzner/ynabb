@@ -598,11 +598,14 @@
   const isPending = (desc) => /^\s*POS\b/i.test(String(desc || ''));
   // The shop part of a bank description, keeping its numbers (pump 4471 is not pump 4472):
   // drops "POS"/"V1234", the dd/mm date, the long reference number at the end, spaces and punctuation.
+  // An overseas purchase clears with its foreign amount where the pending line had the town
+  // ("TRADINGVIEWA*PRODUCT USD 19.99" vs "TRADINGVIEWA*PRODUCT WESTERVILLE"), so that amount goes too.
   function shopKey(desc) {
     return String(desc || '').toLowerCase()
       .replace(/^\s*(pos|v\d{3,5})\s+/, '')
       .replace(/^\d{1,2}\/\d{1,2}(\/\d{2,4})?\s+/, '')
       .replace(/\s+\d{8,}\s*$/, '')
+      .replace(/\s+[a-z]{3}\s+[\d,]+\.\d{2}\s*$/, '')
       .replace(/[^a-z0-9]+/g, '');
   }
   function classifyImport(acctId, rows, existing) {

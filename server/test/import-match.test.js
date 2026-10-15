@@ -29,3 +29,10 @@ test('lines more than 5 days from any entry still come in as new', () => {
   const out = E.classifyImport('a', [bank('2026-10-20', -460, 'DRIVER')], [typed('t', '2026-10-10', -460, 'Driver')]);
   assert.equal(out[0].status, 'new');
 });
+
+test('an overseas purchase imported while pending is updated when it clears with its foreign amount', () => {
+  const pending = { id: 'p', acct: 'a', date: '2026-10-09', amt: -2965, payee: 'TradingView', ik: 'a|old|1', bank: 'POS 09/10 TRADINGVIEWA*PRODUCT WESTERVILLE', cleared: 'r' };
+  const out = E.classifyImport('a', [bank('2026-10-09', -2965, 'V6913 09/10 TRADINGVIEWA*PRODUCT USD 19.99 74364816282')], [pending]);
+  assert.equal(out[0].status, 'update');
+  assert.equal(out[0].updateId, 'p');
+});

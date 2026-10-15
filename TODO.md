@@ -22,6 +22,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-15: **Overseas purchases clear properly (Dani).** A pending overseas charge (e.g. 'POS 09/10 TRADINGVIEWA*PRODUCT WESTERVILLE') clears with its foreign amount instead of the town ('… USD 19.99 …'). So import showed it as new and said the pending one had been released. The foreign amount is now ignored when comparing shop names, so the pending one is updated in place.
 - 2026-10-15: **Import pairs the closest matches first (Dani).** Bank lines used to be matched to typed-in entries one at a time, top of the file first. So a $4.60 line could take the entry belonging to another $4.60 a few days away, leaving the right one to come in as a double. Now every possible pair is scored first and the closest pairs win across the whole file. Automatic tests cover it.
 - 2026-10-15: **Tap a category to move money into it (Dani).** Tapping a category's Available amount now opens Move money with that category under 'Give to'. It takes from its group, or Ready to Assign when there's money there, and fills in what its target still needs. The swap button turns it round to take money out. Overspent categories and Ready to Assign work as before.
 - 2026-10-15: **Weekly choice in the payoff plan (Dani).** The Payoff plan now has 'How often' next to Repayment (each month, or every Monday to Sunday). 'Make it the target' sets a weekly target, e.g. $205 every Friday for an ATO plan. Before, weekly could only be chosen in the account's settings.
