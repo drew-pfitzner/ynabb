@@ -649,6 +649,20 @@
       }
       return Object.assign({}, r, { ik, status: 'new' });
     });
+    // The same cleared line can come back in a later file worded a little differently or with a different processing date,
+    // so its key differs. An earlier import with the exact amount, the same written date and the same shop name, within 3 days,
+    // is that line: skipped as already in. Not when this file also has that earlier line itself, which makes two real purchases.
+    const fileIks = new Set(out.map((r) => r.ik));
+    out.forEach((r, i) => {
+      if (r.status !== 'new' || isPending(r.desc)) return;
+      const rDM = dayMonth(r.desc), shop = shopKey(r.desc);
+      if (!rDM || shop.length < 4) return;
+      const t = imported.find((x) => !used.has(x.id) && x.amt === r.amt && x.bank && !isPending(x.bank)
+        && !fileIks.has(x.ik) && !(x.iks || []).some((k) => fileIks.has(k))
+        && dmNear(rDM, dayMonth(x.bank)) && commonStart(shop, shopKey(x.bank)) >= 6
+        && Math.abs((Date.parse(x.date) - Date.parse(r.date)) / 864e5) <= 3);
+      if (t) { used.add(t.id); out[i] = Object.assign({}, r, { status: 'dupe', dupeOf: t.id }); }
+    });
     // Match bank lines to entries typed by hand. Every possible pair is scored first, and the closest pairs are taken first
     // across the whole file: going line by line, an earlier $4.60 could take the entry that belongs to a later $4.60
     // a few days away, leaving the right line to come in as a double.

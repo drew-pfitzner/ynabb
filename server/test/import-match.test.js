@@ -54,3 +54,24 @@ test("NAB's real wording: the town on the pending line, the support site on the 
   const out = E.classifyImport('a', [bank('2026-10-09', -2965, 'V1234 09/10 TRADINGVIEWA*PRODUCT TV.SUPPORT 74360000000')], [pending]);
   assert.equal(out[0].status, 'update');
 });
+
+test('a cleared line imported before comes back worded a little differently: skipped as already in', () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-08', posted: '2026-10-09', amt: -460, ik: 'a|2026-10-09|-460|driver foodworks|1', bank: 'V6772 08/10 DRIVER FOODWORKS 74360000001' };
+  const out = E.classifyImport('a', [bank('2026-10-10', -460, 'V6772 08/10 DRIVERFOODWORKS PTY 74360000002')], [earlier]);
+  assert.equal(out[0].status, 'dupe');
+});
+
+test('two real purchases at the same shop on the same day both stay when the file has both', () => {
+  const desc = 'V6772 08/10 DRIVER FOODWORKS 74360000001';
+  const first = E.classifyImport('a', [bank('2026-10-09', -460, desc)], [])[0];
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-08', amt: -460, ik: first.ik, bank: desc };
+  const out = E.classifyImport('a', [bank('2026-10-09', -460, desc), bank('2026-10-09', -460, 'V6772 08/10 DRIVER FOODWORKS 74360000009')], [earlier]);
+  assert.equal(out[0].status, 'dupe');
+  assert.equal(out[1].status, 'new');
+});
+
+test("NAB's real wording: the same line again without its reference number, processed on a different day", () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-08', amt: -460, ik: 'a|2026-10-09|-460|driver foodworks griffith|1', bank: 'V1234 08/10 DRIVER FOODWORKS GRIFFITH 01500000000' };
+  const out = E.classifyImport('a', [{ date: '2026-10-08', posted: '2026-10-12', amt: -460, desc: 'V1234 08/10 DRIVER FOODWORKS GRIFFITH' }], [earlier]);
+  assert.equal(out[0].status, 'dupe');
+});
