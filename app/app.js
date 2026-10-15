@@ -1365,7 +1365,9 @@
   // a bank text date more than 5 days from the transaction's date: the date is probably wrong
   const dateOff = (t) => { const d = descDate(t); return d && Math.abs(Date.parse(d) - Date.parse(t.date)) > 5 * 864e5 ? d : null; };
   // pairs that look like the same purchase recorded twice
-  function recPairs(acct) {
+  // outBy: how far out reconcile is. Two lines that both came from the bank are normally two real purchases, but when the
+  // account is out by exactly their amount and they name the same day and shop, the same line was imported twice.
+  function recPairs(acct, outBy) {
     const byAmt = {};
     D.tx.forEach((t) => { if (t.acct === acct) (byAmt[t.amt] = byAmt[t.amt] || []).push(t); });
     const out = [];
@@ -1374,7 +1376,8 @@
       if (g.length < 2) continue;
       for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) {
         const x = g[i], y = g[j];
-        if (x.ik && y.ik) continue; // two lines from the bank are two real transactions
+        const both = !!(x.ik && y.ik);
+        if (both && !(outBy && Math.abs(x.amt) === Math.abs(outBy))) continue; // two lines from the bank are two real transactions
         if (x.pair && y.pair) continue;
         if ((x.notWith || []).includes(y.id) || (y.notWith || []).includes(x.id)) continue;
         const dx = descDate(x), dy = descDate(y);
@@ -1386,9 +1389,10 @@
         const btxt = (t) => t.bank || (String(t.memo || '').split('\uD83D\uDD39')[1] || '').trim();
         const sk = (t) => E.shopKey(btxt(t).replace(/^\s*(POS|EFTPOS|V?\d{3,5})\s+[\d/:\s]*/i, ''));
         if (!exact && btxt(x) && btxt(y) && sk(x) !== sk(y)) continue;
+        if (both && !(exact && sk(x) === sk(y))) continue;
         if (x.cleared === 'r' && y.cleared === 'r' && !dateOff(x) && !dateOff(y)) continue; // settled long ago
         const [a, b] = (x.ik ? 1 : 0) >= (y.ik ? 1 : 0) ? [x, y] : [y, x]; // the bank's copy first
-        out.push({ a, b, same, exact, gap, day: dx || dy, day2: dy && dy !== dx ? dy : null });
+        out.push({ a, b, same, exact, gap, both, day: dx || dy, day2: dy && dy !== dx ? dy : null });
       }
     }
     return out.sort((p, q) => (q.same ? 1 : 0) - (p.same ? 1 : 0) || (p.a.date < q.a.date ? 1 : -1));
@@ -1411,6 +1415,7 @@
     if (t.receipt && !k.receipt) { k.receipt = t.receipt; k.receiptType = t.receiptType || null; }
     if (t.payee && (!k.payee || (k.bank && k.payee === tidyPayee(k.bank)))) k.payee = t.payee; // your own name beats one made from the bank text
     if (!k.bank && t.bank) k.bank = t.bank;
+    if (k.ik && t.ik) k.iks = (k.iks || []).concat(t.ik, t.iks || []).filter((x, i, l) => x !== k.ik && l.indexOf(x) === i);
     return k;
   }
   // shift- or ⌘-clicked rows: the main selection plus these
@@ -1572,7 +1577,7 @@
     const ritems = {}, inItem = new Set(items.flatMap((it) => it.ts.concat(it.bs).map((t) => t.id)));
     items.forEach((it, i) => (ritems[RD_SEC[it.kind]] = ritems[RD_SEC[it.kind]] || []).push(i));
     const gone = extraFit(items);
-    const pairs = out ? recPairs(UI.rec.acct).filter((p) => !inItem.has(p.a.id) && !inItem.has(p.b.id)) : [];
+    const pairs = out ? recPairs(UI.rec.acct, recState().diff).filter((p) => !inItem.has(p.a.id) && !inItem.has(p.b.id)) : [];
     const inPair = new Set(pairs.flatMap((p) => [p.a.id, p.b.id]));
     // a waiting row that's part of one of those sits only there, till it's sorted, so nothing shows twice
     recWaiting().filter((t) => !inPair.has(t.id) && !inItem.has(t.id)).forEach((t) => (groups[checkOf(t)[0]] = groups[checkOf(t)[0]] || []).push(t));
@@ -1677,7 +1682,8 @@
     const name = esc(p.a.payee || p.b.payee || tidyPayee(p.a.bank || p.b.bank) || 'No payee');
     const who = (t) => (t.ik ? 'Bank' : 'Manual'), when = `${who(p.b)} ${dateLabel(p.b.date)} → ${who(p.a)} ${dateLabel(p.a.date)}`;
     const half = (t) => `<div class="ck-cr"><span class="ck-cl">${t.ik ? 'Bank' : 'Manual'}</span><span class="ck-cn">${esc(t.payee || 'No payee')} · ${esc(catLabel(t) || 'Uncategorized')}${t.memo ? ` · <i>${esc(t.memo)}</i>` : ''}<small>${esc(dateLabel(t.date))}${t.cleared === 'r' ? ' · reconciled' : ''}</small>${t.bank ? `<small class="mono">${esc(t.bank)}</small>` : ''}</span><b>${esc(money(Math.abs(t.amt)))}</b></div>`;
-    const why = p.exact ? `Both bank descriptions say ${dateLabel(p.day)}.` : p.same ? "The bank descriptions are a day apart. That happens when a pending line becomes the final one." : '';
+    const why = p.both ? `Both came from bank files and say ${dateLabel(p.day)}, and the account is out by exactly this much: the bank sent the same line twice.`
+      : p.exact ? `Both bank descriptions say ${dateLabel(p.day)}.` : p.same ? "The bank descriptions are a day apart. That happens when a pending line becomes the final one." : '';
     const keep = `<button class="btn sm" data-action="dbl-not" data-a="${p.a.id}" data-b="${p.b.id}">Not the Same</button>`;
     return `<div class="ck-row${open ? ' open' : ''}">
         <button class="ck-main" data-action="chk-peek" data-id="${key}" aria-expanded="${open}" title="${open ? 'Show less' : 'Show both'}">
