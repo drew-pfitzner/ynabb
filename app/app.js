@@ -5574,6 +5574,11 @@
       if (!c) return;
       await putCat(Object.assign({}, c, { target: amount > 0 ? { type: 'monthly', amount } : null }));
     },
+    async setTarget(catId, target) {
+      const c = D.cats[catId];
+      if (!c) return;
+      await putCat(Object.assign({}, c, { target }));
+    },
     async setDebtPayment(acctId, amount, isMin) {
       const a = D.accounts[acctId];
       if (!a) return;
