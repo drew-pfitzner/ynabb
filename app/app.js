@@ -2682,7 +2682,7 @@
           ${st.gone && st.gone.length ? `<div class="warn-box gone-box"><b>${st.gone.length === 1 ? 'A pending charge is' : `${st.gone.length} pending charges are`} no longer in the bank file.</b> ${st.gone.length === 1 ? 'It was' : 'They were'} imported while pending, but this file covers ${st.gone.length === 1 ? 'its date' : 'their dates'} and doesn't include ${st.gone.length === 1 ? 'it' : 'them'}, cleared or pending. That usually means the bank released a hold (a hotel, a hire car, a fuel pre-authorisation). Ticked ones are removed when you import.
             <ul class="rc-list">${st.gone.map((t) => `<li><label class="check"><input type="checkbox" data-gone="${t.id}" ${st.goneSel.has(t.id) ? 'checked' : ''}><span>${esc(dateLabel(t.date))}</span><span>${esc(t.payee || '')} <small class="muted">${esc(t.bank || '')}${t.cleared === 'r' ? ' · reconciled' : ''}</small></span><b class="${t.amt > 0 ? 'pos' : ''}">${txAmt(t.amt)}</b></label></li>`).join('')}</ul></div>` : ''}
           ${n.dupe ? `<details class="im-more" id="im-dupes" ${st.dupesOpen ? 'open' : ''}><summary>${n.dupe} already in YNABB <small>skipped</small></summary><div class="im-list">${group((r) => r.status === 'dupe')}</div></details>` : ''}
-          ${n.early ? `<details class="im-more" id="im-early" ${st.earlyOpen ? 'open' : ''}><summary>${n.early} from before the starting balance <small>skipped</small></summary><p class="hint">${esc(acctName(st.acct))}'s starting balance on ${esc(dateLabel(st.startDate))} already includes ${n.early === 1 ? 'it' : 'them'}.</p><div class="im-list">${group((r) => r.status === 'early')}</div></details>` : ''}
+          ${n.early ? `<details class="im-more" id="im-early" ${st.earlyOpen ? 'open' : ''}><summary>${n.early} already in the starting balance <small>skipped</small></summary><p class="hint">${esc(acctName(st.acct))}'s starting balance on ${esc(dateLabel(st.startDate))} already includes ${n.early === 1 ? 'it' : 'them'}${c.some((r) => r.sameDay) ? ": the bank's balance after them matches it exactly" : ''}.</p><div class="im-list">${group((r) => r.status === 'early')}</div></details>` : ''}
           ${st.rows ? `<p class="fine im-file">${esc(st.file || 'Your file')} · ${c.length} lines · <button class="linkish" data-saction="cols">Columns look wrong?</button></p>` : ''}`;
       }
       setSheetBody(html);
@@ -2722,6 +2722,16 @@
       const sb = existing.filter((t) => /^starting balance$/i.test(t.payee || '')).sort((a, b) => (a.date < b.date ? -1 : 1))[0];
       st.startDate = sb ? sb.date : null;
       if (st.startDate) st.classified.forEach((r) => { if (r.status === 'new' && (r.posted || r.date) < st.startDate) r.status = 'early'; });
+      // the starting balance is often typed from the bank app late on its own date, so some of that day's lines are already in it.
+      // The bank's running balance says which: the line that left exactly the starting balance, and those before it that day.
+      if (sb) {
+        const ok = st.classified.map((r, i) => ({ r, i, date: r.posted || r.date, amt: r.amt, bal: r.bal })).filter((x) => Number.isFinite(x.bal) && !Number.isNaN(x.amt));
+        const chron = ok.length && newestFirst(ok) ? ok.slice().reverse() : ok;
+        const day = chron.filter((x) => x.date === st.startDate);
+        let upTo = -1;
+        day.forEach((x, k) => { if (x.bal === sb.amt) upTo = k; });
+        day.slice(0, upTo + 1).forEach((x) => { if (x.r.status === 'new') { x.r.status = 'early'; x.r.sameDay = true; } });
+      }
       st.include = {};
       st.classified.forEach((r, i) => (st.include[i] = r.status !== 'dupe' && r.status !== 'early'));
       // pending charges imported before, dated inside this file's dates, that the bank no longer shows (a released hold)
@@ -3032,17 +3042,19 @@
   function dayBalances(rows) {
     const ok = rows.filter((r) => r.date && !Number.isNaN(r.amt) && Number.isFinite(r.bal));
     if (!ok.length) return null;
-    // files list newest first or oldest first: whichever way each balance follows from the one before
+    const chron = newestFirst(ok) ? ok.slice().reverse() : ok;
+    const out = {};
+    chron.forEach((r) => (out[r.date] = r.bal)); // the last one each day is the end-of-day balance
+    return out;
+  }
+  // files list newest first or oldest first: whichever way each balance follows from the one before
+  function newestFirst(ok) {
     let newest = 0, oldest = 0;
     for (let i = 0; i + 1 < ok.length; i++) {
       if (ok[i].bal === ok[i + 1].bal + ok[i].amt) newest++;
       if (ok[i + 1].bal === ok[i].bal + ok[i + 1].amt) oldest++;
     }
-    if (newest === oldest) newest = ok[0].date > ok[ok.length - 1].date ? 1 : 0;
-    const chron = newest > oldest ? ok.slice().reverse() : ok;
-    const out = {};
-    chron.forEach((r) => (out[r.date] = r.bal)); // the last one each day is the end-of-day balance
-    return out;
+    return newest === oldest ? ok[0].date > ok[ok.length - 1].date : newest > oldest;
   }
   async function saveDayBalances(acct, days, rows) {
     if (!days || !Object.keys(days).length) return;

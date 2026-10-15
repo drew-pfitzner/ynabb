@@ -22,6 +22,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-15: **No doubles on the starting balance's day (Dani).** A starting balance is often typed from the bank app late in the day, after that day's spending. Importing then added those purchases again, so the account came out a few dollars short. Import now reads NAB's running balance: the lines that leave exactly the starting balance on that day are skipped, under '… already in the starting balance'.
 - 2026-10-15: **Always the same colours (Dani).** The app no longer switches to dark colours when a phone, iPad or Mac is in dark mode, so everyone sees the same budget, bars included. The dark colours are kept in the code but switched off.
 - 2026-10-15: **Bar colours on older browsers (Dani).** On older Safari (iPads and Macs not updated since 2022), the budget bars had no green, orange or purple because those browsers skip one kind of colour rule. They now get plain backup colours, as do highlighted transaction rows.
 - 2026-10-15: **Weekly targets (Dani).** A new 'Set aside every week' target: an amount and a day (e.g. $50 every Friday). Each month it asks for that amount times how many of that day the month has, so a month with five Fridays asks for five lots.
