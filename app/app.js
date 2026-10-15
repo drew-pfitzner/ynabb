@@ -484,9 +484,10 @@
       if (ti && ti.under === 0) return `<span class="st funded">On track</span><span class="tdesc">${owes} · ${money(r.available)} ready to pay</span>`;
       return `<span class="st under">${owes}</span><span class="tdesc">${money(r.available)} ready to pay${ti && ti.under > 0 ? ` · target asks for ${money(ti.under)} more` : ''}</span>`;
     }
-    // a loan is meant to be paid over time: what matters is this month's repayment
-    if (ti && ti.under > 0) return `<span class="st under">Needs ${money(ti.under)} for this month</span><span class="tdesc">${owes}</span>`;
-    if (ti) return `<span class="st funded">Repayment covered</span><span class="tdesc">${owes}</span>`;
+    // a loan is meant to be paid over time: what matters is this month's repayment, and for a weekly plan the next one
+    const nxt = payWeekly(a) && a.payment ? ` · next ${money(a.payment)} on ${dateLabel(nextWeekday(a.payDay))}` : '';
+    if (ti && ti.under > 0) return `<span class="st under">Needs ${money(ti.under)} for this month</span><span class="tdesc">${owes}${nxt}</span>`;
+    if (ti) return `<span class="st funded">Repayment covered</span><span class="tdesc">${owes}${nxt}</span>`;
     return `<span class="tdesc">${owes} · ${money(r.available)} ready to pay</span>`;
   }
   function targetLine(id, r) {
@@ -579,7 +580,14 @@
   function splitBasis() { try { return localStorage.getItem('zeroline-split-basis') || 'assigned'; } catch (e) { return 'assigned'; } }
   function splitGoals() { return Object.assign({ need: 50, want: 30, save: 20 }, S.settings().split || {}); }
   // a card or loan's minimum each month: the minimum payment if set, otherwise a loan's set repayment
-  const minPayOf = (a) => (a ? (a.minPay != null ? a.minPay : a.type !== 'credit' ? a.payment || 0 : 0) : 0);
+  const minPayOf = (a) => (a ? (a.minPay != null ? a.minPay : a.type !== 'credit' ? payMonthly(a) : 0) : 0);
+  // a loan repaid weekly (like an ATO payment plan) keeps the amount of each payment and the weekday it comes out
+  const payWeekly = (a) => !!a && a.payDay != null && a.type !== 'credit';
+  const payMonthly = (a) => (payWeekly(a) ? Math.ceil((a.payment || 0) * 52 / 12) : a.payment || 0);
+  const payTarget = (a) => (payWeekly(a) ? { type: 'weekly', amount: a.payment, day: a.payDay } : { type: 'monthly', amount: a.payment });
+  const paySay = (a) => (payWeekly(a) ? `${money(a.payment)} every ${WEEKDAYS[a.payDay]}` : `${money(a.payment)}/month`);
+  // the next time a weekday comes round, today included
+  const nextWeekday = (wd) => { const d = new Date(); d.setDate(d.getDate() + ((wd - d.getDay() + 7) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   function splitTotals(basis) {
     const tot = { need: 0, want: 0, save: 0, none: 0 };
     const add = (id, v) => {
@@ -3323,8 +3331,13 @@
   const owingOf = (id) => Math.max(0, -((D.bal[id] || {}).balance || 0));
   const payAvail = (id) => (D.debt[id] && D.month.rows[D.debt[id]] ? D.month.rows[D.debt[id]].available : 0);
 
-  // every card and loan gets a payment category in a "Debt payments" group at the top of the budget
-  async function ensurePayCat(a) {
+  // every card and loan gets a payment category in a "Debt payments" group at the top of the budget.
+  // Saving an account re-renders, and the render's own check can start this too: both share one job, or each would add one.
+  const payCatJobs = {};
+  function ensurePayCat(a) {
+    return payCatJobs[a.id] || (payCatJobs[a.id] = makePayCat(a).finally(() => delete payCatJobs[a.id]));
+  }
+  async function makePayCat(a) {
     D = snapshot();
     const cats = Object.values(D.cats);
     let cat = cats.find((c) => c.debtFor === a.id);
@@ -3339,7 +3352,7 @@
     }
     const sib = cats.filter((c) => c.parent === group.id);
     const id = S.uid();
-    await putCat({ id, name: a.name, parent: group.id, order: sib.reduce((m, c) => Math.max(m, c.order || 0), 0) + 1, hidden: false, target: a.type !== 'credit' && a.payment > 0 ? { type: 'monthly', amount: a.payment } : null, note: '', debtFor: a.id });
+    await putCat({ id, name: a.name, parent: group.id, order: sib.reduce((m, c) => Math.max(m, c.order || 0), 0) + 1, hidden: false, target: a.type !== 'credit' && a.payment > 0 ? payTarget(a) : null, note: '', debtFor: a.id });
     return id;
   }
 
@@ -3369,7 +3382,7 @@
       const pc = D.debt[a.id], ti = pc && D.month.rows[pc] ? D.month.rows[pc].target : null;
       const meta = [esc(ASHORT[a.type])];
       if (a.rate) meta.push(`${a.rate}%`); else if (a.type === 'bnpl') meta.push('no interest');
-      if (a.payment) meta.push(`${money(a.payment)}/month`);
+      if (a.payment) meta.push(paySay(a));
       if (a.minPay != null && a.minPay !== a.payment) meta.push(`min ${money(a.minPay)}`);
       if (a.limit) meta.push(`${money(Math.max(0, a.limit - owing))} credit left`);
       // the bar: a card is covered when everything owed has money waiting; a loan when this month's repayment is
@@ -3411,14 +3424,17 @@
           <p class="hint" id="ac-hint"></p>` : ''}
         <div id="ac-debt">
           <div class="grid2">
-            <div class="field"><label for="ac-rate">Interest rate (% a year)</label><input id="ac-rate" inputmode="decimal" placeholder="e.g. 19.99" value="${a.rate || ''}"></div>
-            <div class="field"><label for="ac-pay">Repayment each month</label><input id="ac-pay" class="cents" inputmode="numeric" autocomplete="off" placeholder="optional" value="${a.payment ? box(a.payment) : ''}"></div>
+            <div class="field"><label for="ac-pay">Repayment</label><input id="ac-pay" class="cents" inputmode="numeric" autocomplete="off" placeholder="optional" value="${a.payment ? box(a.payment) : ''}"></div>
+            <div class="field" id="ac-every-f"><label for="ac-every">How often</label><select id="ac-every"><option value="m">Each month</option>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<option value="${d}" ${a.payDay === d ? 'selected' : ''}>Every ${WEEKDAYS[d]}</option>`).join('')}</select></div>
           </div>
           <div class="grid2">
+            <div class="field"><label for="ac-rate">Interest rate (% a year)</label><input id="ac-rate" inputmode="decimal" placeholder="e.g. 19.99" value="${a.rate || ''}"></div>
             <div class="field"><label for="ac-min">Minimum payment each month</label><input id="ac-min" class="cents" inputmode="numeric" autocomplete="off" placeholder="${a.type === 'credit' ? 'from your statement' : 'same as the repayment'}" value="${a.minPay != null ? box(a.minPay) : ''}"></div>
+          </div>
+          <div class="grid2">
             <div class="field" id="ac-limit-f"><label for="ac-limit">Credit limit</label><input id="ac-limit" class="cents" inputmode="numeric" autocomplete="off" placeholder="optional" value="${a.limit ? box(a.limit) : ''}"></div>
           </div>
-          <p class="hint">The minimum payment counts as a need in "Where this month's budget is going". Anything extra counts as freedom. For a loan, leave it blank to use the repayment. ${isNew ? 'A repayment amount becomes the monthly target for its payment category.' : ''}</p>
+          <p class="hint">The minimum payment counts as a need in "Where this month's budget is going". Anything extra counts as freedom. For a loan, leave it blank to use the repayment. The repayment becomes the target for its payment category, so the budget asks for it each week or month.</p>
         </div>
         ${!isNew ? `<label class="check"><input type="checkbox" id="ac-closed" ${a.closed ? 'checked' : ''}> Closed (hide from lists, keep its history)</label>` : ''}`,
       foot: `<button class="btn primary" data-saction="save">${isNew ? 'Add account' : 'Save'}</button>${!isNew && !hasTx ? '<button class="btn danger" data-saction="delete">Delete</button>' : ''}`,
@@ -3427,6 +3443,7 @@
       const t = $('#ac-type').value, dbt = !!DEBT_TYPES[t];
       $('#ac-debt').hidden = !dbt;
       $('#ac-limit-f').hidden = t !== 'credit';
+      $('#ac-every-f').hidden = t === 'credit';
       if (isNew) {
         $('#ac-bal-l').textContent = dbt ? 'Amount owing today' : t === 'tracking' ? 'Value today' : 'Balance today';
         $('#ac-hint').textContent = dbt ? 'What you owe, as a positive number. It doesn\'t come out of Ready to Assign. A payment category is added to your budget to pay it off.'
@@ -3446,13 +3463,23 @@
           const rate = parseFloat(($('#ac-rate').value || '').replace(/[^0-9.]/g, ''));
           a.rate = rate > 0 ? Math.round(rate * 100) / 100 : null;
           const pay = E.parseMoney($('#ac-pay').value); a.payment = pay > 0 ? pay : null;
+          const ev = $('#ac-every').value; a.payDay = a.type !== 'credit' && ev !== 'm' ? Number(ev) : null;
           const lim = a.type === 'credit' ? E.parseMoney($('#ac-limit').value) : 0; a.limit = lim > 0 ? lim : null;
           const mn = ($('#ac-min').value || '').trim(); a.minPay = mn ? Math.max(0, E.parseMoney(mn) || 0) : null;
         }
         if (!isNew) a.closed = $('#ac-closed').checked;
         if (isNew) a.order = Object.keys(D.accounts).length + 1;
+        const was = isNew ? null : Object.assign({}, D.accounts[a.id]);
         await putAcct(a);
-        if (dbt) await ensurePayCat(a);
+        if (dbt) {
+          const pc = await ensurePayCat(a);
+          // a target that followed the old repayment (or none at all) follows the new one, weekly or monthly
+          D = snapshot();
+          const ct = D.cats[pc] && D.cats[pc].target;
+          const followed = !ct || (was && was.payment && ((ct.type === 'monthly' && ct.amount === was.payment) || (ct.type === 'weekly' && ct.amount === was.payment)));
+          const changed = !was || was.payment !== a.payment || (was.payDay == null ? null : was.payDay) !== a.payDay;
+          if (!isNew && a.type !== 'credit' && a.payment > 0 && followed && changed) await putCat(Object.assign({}, D.cats[pc], { target: payTarget(a) }));
+        }
         else if (!isNew && DEBT_TYPES[oldType]) {
           // no longer a debt: its payment category becomes an ordinary category
           const c = Object.values(D.cats).find((k) => k.debtFor === a.id);
@@ -3492,17 +3519,19 @@
     if (!a) return;
     const owing = owingOf(id), payCat = D.debt[id];
     const tgt = payCat && D.cats[payCat].target && D.cats[payCat].target.type === 'monthly' ? D.cats[payCat].target.amount : 0;
+    // a weekly plan is typed in weeks; the payoff sums are monthly, and a month has 52/12 weeks on average
+    const wk = payWeekly(a), per = wk ? 'week' : 'month', k = wk ? 52 / 12 : 1;
     openSheet({
       title: 'Payoff plan: ' + a.name,
       body: `<p>You owe <b>${money(owing)}</b>${payCat ? `, and <b>${money(payAvail(id))}</b> is ready to pay it in the ${esc(D.cats[payCat].name)} payment category` : ''}.</p>
         <div class="grid2">
           <div class="field"><label for="po-rate">Interest rate (% a year)</label><input id="po-rate" inputmode="decimal" value="${a.rate || ''}" placeholder="e.g. 19.99"></div>
-          <div class="field"><label for="po-pay">Repayment each month</label><input id="po-pay" class="cents" inputmode="numeric" autocomplete="off" value="${box(a.payment || tgt || Math.max(2500, Math.round(owing * 0.03)))}"></div>
+          <div class="field"><label for="po-pay">Repayment each ${per}${wk ? ` (${WEEKDAYS[a.payDay]})` : ''}</label><input id="po-pay" class="cents" inputmode="numeric" autocomplete="off" value="${box(a.payment || tgt || Math.max(2500, Math.round(owing * 0.03)))}"></div>
         </div>
-        <div class="field"><label for="po-extra">Extra each month, to see what it saves</label><input id="po-extra" class="cents" inputmode="numeric" autocomplete="off" value="0"></div>
+        <div class="field"><label for="po-extra">Extra each ${per}, to see what it saves</label><input id="po-extra" class="cents" inputmode="numeric" autocomplete="off" value="0"></div>
         <div id="po-out"></div>
         ${a.type === 'credit' ? '<p class="fine">Using the card for everyday spending is fine: that spending moves into the payment category by itself, so pay the card from there. This plan is for the balance you already carry.</p>' : ''}`,
-      foot: `${payCat ? '<button class="btn primary" data-saction="target">Make it the monthly target</button>' : ''}<button class="btn" data-saction="save">Save rate and repayment</button>`,
+      foot: `${payCat ? `<button class="btn primary" data-saction="target">Make it the ${wk ? 'weekly' : 'monthly'} target</button>` : ''}<button class="btn" data-saction="save">Save rate and repayment</button>`,
     });
     const read = () => {
       const rate = parseFloat(($('#po-rate').value || '').replace(/[^0-9.]/g, '')) || 0;
@@ -3512,13 +3541,13 @@
     const show = () => {
       const { rate, pay, extra } = read();
       if (!owing) { $('#po-out').innerHTML = '<p class="ok-line">Nothing owed.</p>'; return; }
-      const base = payoff(owing, rate, pay);
+      const base = payoff(owing, rate, Math.round(pay * k));
       let html;
-      if (base.never) html = `<div class="warn-box">At ${money(pay)} a month it never gets paid off: the interest (${money(Math.round(owing * rate / 1200))} a month) is more than the repayment.</div>`;
+      if (base.never) html = `<div class="warn-box">At ${money(pay)} a ${per} it never gets paid off: the interest (${money(Math.round(owing * rate / 1200))} a month) is more than the repayment.</div>`;
       else html = `<div class="po-res"><div><span>Debt-free</span><b>${whenFrom(base.months)}</b><small>${howLong(base.months)}</small></div><div><span>Interest you'd pay</span><b>${money(base.interest)}</b></div></div>`;
       if (extra > 0) {
-        const more = payoff(owing, rate, pay + extra);
-        if (!more.never) html += `<p class="po-save">Paying <b>${money(extra)} more</b> a month (${money(pay + extra)}): debt-free in <b>${whenFrom(more.months)}</b>${base.never ? '' : `, <b>${howLong(base.months - more.months)} sooner</b>, saving <b>${money(base.interest - more.interest)}</b> in interest`}.</p>`;
+        const more = payoff(owing, rate, Math.round((pay + extra) * k));
+        if (!more.never) html += `<p class="po-save">Paying <b>${money(extra)} more</b> a ${per} (${money(pay + extra)}): debt-free in <b>${whenFrom(more.months)}</b>${base.never ? '' : `, <b>${howLong(base.months - more.months)} sooner</b>, saving <b>${money(base.interest - more.interest)}</b> in interest`}.</p>`;
       }
       if (!rate) html += '<p class="fine">Add the interest rate for a true picture. Afterpay and Zip charge no interest, only late fees.</p>';
       $('#po-out').innerHTML = html;
@@ -3535,8 +3564,8 @@
         const { rate, pay, extra } = read();
         if (!(pay + extra > 0)) { toast('Enter a repayment amount.'); return; }
         await putAcct(Object.assign({}, D.accounts[id], { rate: rate || null, payment: pay || null }));
-        await putCat(Object.assign({}, D.cats[payCat], { target: { type: 'monthly', amount: pay + extra } }));
-        toast(`${D.cats[payCat].name} now asks for ${money(pay + extra)} each month`); closeSheet(); render();
+        await putCat(Object.assign({}, D.cats[payCat], { target: wk ? { type: 'weekly', amount: pay + extra, day: a.payDay } : { type: 'monthly', amount: pay + extra } }));
+        toast(`${D.cats[payCat].name} now asks for ${money(pay + extra)} ${wk ? `every ${WEEKDAYS[a.payDay]}` : 'each month'}`); closeSheet(); render();
       },
     };
   }
@@ -5600,7 +5629,7 @@
     async setDebtPayment(acctId, amount, isMin) {
       const a = D.accounts[acctId];
       if (!a) return;
-      await putAcct(Object.assign({}, a, a.type === 'credit' ? { minPay: amount || null } : { payment: amount || null }));
+      await putAcct(Object.assign({}, a, a.type === 'credit' ? { minPay: amount || null } : { payment: amount || null, payDay: null }));
       D = snapshot();
       const pc = D.debt[acctId];
       if (pc && amount > 0) await putCat(Object.assign({}, D.cats[pc], { target: { type: 'monthly', amount } }));
