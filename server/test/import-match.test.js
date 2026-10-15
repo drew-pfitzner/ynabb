@@ -48,3 +48,9 @@ test('a different shop with the same amount and date is not taken for the pendin
   const out = E.classifyImport('a', [bank('2026-10-09', -2965, 'V6913 09/10 TRADEMART SYDNEY 74364816282')], [pending]);
   assert.equal(out[0].status, 'new');
 });
+
+test("NAB's real wording: the town on the pending line, the support site on the cleared one", () => {
+  const pending = { id: 'p', acct: 'a', date: '2026-10-09', amt: -2965, ik: 'a|old|1', bank: 'POS 09/10 TRADINGVIEWA*PRODUCTWESTERVILLE', cleared: 'r' };
+  const out = E.classifyImport('a', [bank('2026-10-09', -2965, 'V1234 09/10 TRADINGVIEWA*PRODUCT TV.SUPPORT 74360000000')], [pending]);
+  assert.equal(out[0].status, 'update');
+});
