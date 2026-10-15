@@ -342,9 +342,10 @@ button.pill:hover { box-shadow: inset 0 0 0 2px var(--accent); }
 .bar { display: flex; height: 5px; border-radius: 99px; overflow: hidden; background: var(--surface-2); gap: 2px; }
 .bar.empty { background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 10px); height: 2px; margin: 2px 0; }
 .seg { display: block; min-width: 3px; height: 100%; }
-.seg.spent { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--spent) 60%, var(--surface)) 0 3px, color-mix(in srgb, var(--spent) 25%, transparent) 3px 6px); }
-.seg.avail { background: color-mix(in srgb, var(--good) 55%, var(--surface)); }
-.seg.need { background: var(--warn-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--need) 70%, var(--surface)); border-radius: 99px; }
+/* older browsers (Safari before 16.2) skip color-mix, so each bar colour gets a plain fallback first */
+.seg.spent { background: repeating-linear-gradient(135deg, var(--spent) 0 3px, transparent 3px 6px); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--spent) 60%, var(--surface)) 0 3px, color-mix(in srgb, var(--spent) 25%, transparent) 3px 6px); }
+.seg.avail { background: var(--good); background: color-mix(in srgb, var(--good) 55%, var(--surface)); }
+.seg.need { background: var(--warn-soft); box-shadow: inset 0 0 0 1px var(--need); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--need) 70%, var(--surface)); border-radius: 99px; }
 .seg.over { background: var(--bad); }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 8px 4px; }
 .legend span { display: inline-flex; gap: 6px; align-items: center; }
@@ -524,7 +525,7 @@ span.rflag { cursor: help; }
 .txl { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: clip; container-type: inline-size; }
 .txr { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
 .txr:last-child { border-bottom: 0; }
-.txr.review { background: color-mix(in srgb, var(--warn-soft) 60%, var(--surface)); }
+.txr.review { background: var(--warn-soft); background: color-mix(in srgb, var(--warn-soft) 60%, var(--surface)); }
 .txr.nocat:not(.matched) { box-shadow: inset 4px 0 0 var(--need); }
 .txr.nocat .tcat.none { color: color-mix(in srgb, var(--need) 65%, var(--ink)); font-weight: 600; }
 .todo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; background: color-mix(in srgb, var(--need) 14%, var(--surface)); border: 1px solid color-mix(in srgb, var(--need) 60%, transparent); border-radius: 10px; padding: 7px 10px 7px 14px; margin-bottom: 10px; font-size: 14px; }
@@ -551,7 +552,7 @@ span.rflag { cursor: help; }
 .t-memo { grid-area: memo; font-size: 12.5px; color: var(--muted); font-style: italic; }
 .t-amt { grid-area: amt; text-align: right; font-weight: 700; }
 .t-side { display: flex; align-items: center; gap: 6px; padding: 0 10px 0 4px; }
-.txr.editing { background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
+.txr.editing { background: var(--accent-soft); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface)); }
 .tx-edit { cursor: default; }
 .tx-edit:hover { background: none; }
 .tx-edit textarea { field-sizing: content; resize: none; min-height: 22px; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
@@ -607,7 +608,7 @@ span.rflag { cursor: help; }
 .ic-unlink { border-color: var(--goal); color: var(--goal); background: var(--surface); }
 .ic-unlink:hover { background: var(--goal); color: var(--surface); }
 .ic-match:hover { filter: brightness(1.15); }
-.txr.selected { background-color: color-mix(in srgb, var(--accent) 16%, var(--surface)) !important; }
+.txr.selected { background-color: var(--accent-soft) !important; background-color: color-mix(in srgb, var(--accent) 16%, var(--surface)) !important; }
 .txl .tx-main:focus, .txl .tx-main:focus-visible { outline: none; }
 .txr[data-row] { cursor: default; }
 .txr.del-ask { background-color: color-mix(in srgb, var(--bad) 18%, var(--surface)) !important; }
