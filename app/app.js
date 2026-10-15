@@ -3517,29 +3517,35 @@
   function openPayoff(id) {
     const a = D.accounts[id];
     if (!a) return;
-    const owing = owingOf(id), payCat = D.debt[id];
+    const owing = owingOf(id), payCat = D.debt[id], card = a.type === 'credit';
     const tgt = payCat && D.cats[payCat].target && D.cats[payCat].target.type === 'monthly' ? D.cats[payCat].target.amount : 0;
-    // a weekly plan is typed in weeks; the payoff sums are monthly, and a month has 52/12 weeks on average
-    const wk = payWeekly(a), per = wk ? 'week' : 'month', k = wk ? 52 / 12 : 1;
+    const often = card ? '' : `<div class="field"><label for="po-every">How often</label><select id="po-every"><option value="m">Each month</option>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<option value="${d}" ${payWeekly(a) && a.payDay === d ? 'selected' : ''}>Every ${WEEKDAYS[d]}</option>`).join('')}</select></div>`;
     openSheet({
       title: 'Payoff plan: ' + a.name,
       body: `<p>You owe <b>${money(owing)}</b>${payCat ? `, and <b>${money(payAvail(id))}</b> is ready to pay it in the ${esc(D.cats[payCat].name)} payment category` : ''}.</p>
         <div class="grid2">
-          <div class="field"><label for="po-rate">Interest rate (% a year)</label><input id="po-rate" inputmode="decimal" value="${a.rate || ''}" placeholder="e.g. 19.99"></div>
-          <div class="field"><label for="po-pay">Repayment each ${per}${wk ? ` (${WEEKDAYS[a.payDay]})` : ''}</label><input id="po-pay" class="cents" inputmode="numeric" autocomplete="off" value="${box(a.payment || tgt || Math.max(2500, Math.round(owing * 0.03)))}"></div>
+          <div class="field"><label for="po-pay">Repayment</label><input id="po-pay" class="cents" inputmode="numeric" autocomplete="off" value="${box(a.payment || tgt || Math.max(2500, Math.round(owing * 0.03)))}"></div>
+          ${often}
         </div>
-        <div class="field"><label for="po-extra">Extra each ${per}, to see what it saves</label><input id="po-extra" class="cents" inputmode="numeric" autocomplete="off" value="0"></div>
+        <div class="grid2">
+          <div class="field"><label for="po-rate">Interest rate (% a year)</label><input id="po-rate" inputmode="decimal" value="${a.rate || ''}" placeholder="e.g. 19.99"></div>
+          <div class="field"><label for="po-extra" id="po-extra-l">Extra each month, to see what it saves</label><input id="po-extra" class="cents" inputmode="numeric" autocomplete="off" value="0"></div>
+        </div>
         <div id="po-out"></div>
-        ${a.type === 'credit' ? '<p class="fine">Using the card for everyday spending is fine: that spending moves into the payment category by itself, so pay the card from there. This plan is for the balance you already carry.</p>' : ''}`,
-      foot: `${payCat ? `<button class="btn primary" data-saction="target">Make it the ${wk ? 'weekly' : 'monthly'} target</button>` : ''}<button class="btn" data-saction="save">Save rate and repayment</button>`,
+        ${card ? '<p class="fine">Using the card for everyday spending is fine: that spending moves into the payment category by itself, so pay the card from there. This plan is for the balance you already carry.</p>' : ''}`,
+      foot: `${payCat ? '<button class="btn primary" data-saction="target" id="po-tgt">Make it the target</button>' : ''}<button class="btn" data-saction="save">Save repayment</button>`,
     });
+    // a weekly plan is typed in weeks; the payoff sums are monthly, and a month has 52/12 weeks on average
     const read = () => {
       const rate = parseFloat(($('#po-rate').value || '').replace(/[^0-9.]/g, '')) || 0;
       const pay = E.parseMoney($('#po-pay').value) || 0, extra = E.parseMoney($('#po-extra').value) || 0;
-      return { rate, pay, extra };
+      const ev = $('#po-every') ? $('#po-every').value : 'm', day = ev === 'm' ? null : Number(ev);
+      return { rate, pay, extra, day, per: day == null ? 'month' : 'week', k: day == null ? 1 : 52 / 12 };
     };
     const show = () => {
-      const { rate, pay, extra } = read();
+      const { rate, pay, extra, day, per, k } = read();
+      $('#po-extra-l').textContent = `Extra each ${per}, to see what it saves`;
+      if ($('#po-tgt')) $('#po-tgt').textContent = day == null ? 'Make it the monthly target' : `Make it the target: every ${WEEKDAYS[day]}`;
       if (!owing) { $('#po-out').innerHTML = '<p class="ok-line">Nothing owed.</p>'; return; }
       const base = payoff(owing, rate, Math.round(pay * k));
       let html;
@@ -3554,18 +3560,15 @@
     };
     show();
     sheet.onInput = show;
+    const keep = ({ rate, pay, day }) => putAcct(Object.assign({}, D.accounts[id], { rate: rate || null, payment: pay || null }, card ? {} : { payDay: day }));
     sheet.actions = {
-      save: async () => {
-        const { rate, pay } = read();
-        await putAcct(Object.assign({}, D.accounts[id], { rate: rate || null, payment: pay || null }));
-        toast('Saved'); closeSheet(); render();
-      },
+      save: async () => { await keep(read()); toast('Saved'); closeSheet(); render(); },
       target: async () => {
-        const { rate, pay, extra } = read();
-        if (!(pay + extra > 0)) { toast('Enter a repayment amount.'); return; }
-        await putAcct(Object.assign({}, D.accounts[id], { rate: rate || null, payment: pay || null }));
-        await putCat(Object.assign({}, D.cats[payCat], { target: wk ? { type: 'weekly', amount: pay + extra, day: a.payDay } : { type: 'monthly', amount: pay + extra } }));
-        toast(`${D.cats[payCat].name} now asks for ${money(pay + extra)} ${wk ? `every ${WEEKDAYS[a.payDay]}` : 'each month'}`); closeSheet(); render();
+        const r = read(), amount = r.pay + r.extra;
+        if (!(amount > 0)) { toast('Enter a repayment amount.'); return; }
+        await keep(r);
+        await putCat(Object.assign({}, D.cats[payCat], { target: r.day == null ? { type: 'monthly', amount } : { type: 'weekly', amount, day: r.day } }));
+        toast(`${D.cats[payCat].name} now asks for ${money(amount)} ${r.day == null ? 'each month' : `every ${WEEKDAYS[r.day]}`}`); closeSheet(); render();
       },
     };
   }

@@ -22,6 +22,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-15: **Weekly choice in the payoff plan (Dani).** The Payoff plan now has 'How often' next to Repayment (each month, or every Monday to Sunday). 'Make it the target' sets a weekly target, e.g. $205 every Friday for an ATO plan. Before, weekly could only be chosen in the account's settings.
 - 2026-10-15: **Weekly debt repayments (Dani).** A loan's settings have 'How often': each month, or every Monday to Sunday (e.g. Simone's ATO plan, $205 every Friday). Its payment category then asks for that amount on every such day in the month, and the budget line shows the next one ('next $205.00 on Fri 16 Oct'). The accounts list and payoff plan use weeks too. Also fixed: adding a loan could make its payment category twice.
 - 2026-10-15: **No doubles on the starting balance's day (Dani).** A starting balance is often typed from the bank app late in the day, after that day's spending. Importing then added those purchases again, so the account came out a few dollars short. Import now reads NAB's running balance: the lines that leave exactly the starting balance on that day are skipped, under '… already in the starting balance'.
 - 2026-10-15: **Always the same colours (Dani).** The app no longer switches to dark colours when a phone, iPad or Mac is in dark mode, so everyone sees the same budget, bars included. The dark colours are kept in the code but switched off.
