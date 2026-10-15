@@ -671,8 +671,6 @@
 #zl-guide { --g-sage: #DDE8D3; --g-sage-i: #46633A; --g-butter: #F7E6B4; --g-butter-i: #7E5B0E; --g-sky: #D7E6F1; --g-sky-i: #2C5878;
   --g-blush: #F5D9D2; --g-blush-i: #94402F; --g-lilac: #E6DDF0; --g-lilac-i: #5E4782; --g-peach: #F8DFC7; --g-peach-i: #8F4E1C;
   --g-dot: rgba(23, 59, 72, .09); --hand: "Caveat", "Bradley Hand", cursive; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #zl-guide { --g-sage: #2A3824; --g-sage-i: #B7D59C; --g-butter: #3B3119; --g-butter-i: #EFCF77;
-  --g-sky: #1F3141; --g-sky-i: #9FC6E6; --g-blush: #3E2521; --g-blush-i: #F1A999; --g-lilac: #2E2840; --g-lilac-i: #C7B6E6; --g-peach: #3F2C1C; --g-peach-i: #F2B57F; --g-dot: rgba(241, 238, 232, .06); } }
 :root[data-theme="dark"] #zl-guide { --g-sage: #2A3824; --g-sage-i: #B7D59C; --g-butter: #3B3119; --g-butter-i: #EFCF77;
   --g-sky: #1F3141; --g-sky-i: #9FC6E6; --g-blush: #3E2521; --g-blush-i: #F1A999; --g-lilac: #2E2840; --g-lilac-i: #C7B6E6; --g-peach: #3F2C1C; --g-peach-i: #F2B57F; --g-dot: rgba(241, 238, 232, .06); }
 .t-sage, .ch-sage { --t: var(--g-sage); --ti: var(--g-sage-i); }
