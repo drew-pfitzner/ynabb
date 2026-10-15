@@ -608,6 +608,7 @@
       .replace(/\s+[a-z]{3}\s+[\d,]+\.\d{2}\s*$/, '')
       .replace(/[^a-z0-9]+/g, '');
   }
+  const commonStart = (a, b) => { let n = 0; while (n < a.length && a[n] === b[n]) n++; return n; };
   function classifyImport(acctId, rows, existing) {
     const byIk = new Set();
     for (const t of existing) { if (t.ik) byIk.add(t.ik); for (const k of t.iks || []) byIk.add(k); }
@@ -633,7 +634,10 @@
           if (used.has(t.id) || !t.bank || !isPending(t.bank)) continue;
           if (t.amt !== r.amt && ((t.amt < 0) !== (r.amt < 0) || (t.splits && t.splits.length))) continue;
           const other = shopKey(t.bank);
-          if (other.length < 4 || !(other === shop || shop.startsWith(other) || other.startsWith(shop))) continue;
+          // the shop names agree, or the exact amount on the same written date with the same first 6 letters
+          // (an overseas or online charge can clear with different words after the name: town, currency, website)
+          const sameDay = t.amt === r.amt && dmNear(dayMonth(r.desc), dayMonth(t.bank));
+          if (other.length < 4 || !(other === shop || shop.startsWith(other) || other.startsWith(shop) || (sameDay && commonStart(shop, other) >= 6))) continue;
           const g = Math.abs((Date.parse(t.date) - Date.parse(r.date)) / 864e5);
           if (g > 3) continue;
           const sc = (t.amt === r.amt ? 0 : 100) + g;

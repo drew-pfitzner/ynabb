@@ -36,3 +36,15 @@ test('an overseas purchase imported while pending is updated when it clears with
   assert.equal(out[0].status, 'update');
   assert.equal(out[0].updateId, 'p');
 });
+
+test('a pending charge clears with different words after the shop name: same amount and date still update it', () => {
+  const pending = { id: 'p', acct: 'a', date: '2026-10-09', amt: -2965, ik: 'a|old|1', bank: 'POS 09/10 TRADINGVIEWA*PRODUCT WESTERVILLE', cleared: 'r' };
+  const out = E.classifyImport('a', [bank('2026-10-09', -2965, 'V6913 09/10 TRADINGVIEW.COM HTTPSTRADINGV OH 74364816282')], [pending]);
+  assert.equal(out[0].status, 'update');
+});
+
+test('a different shop with the same amount and date is not taken for the pending one', () => {
+  const pending = { id: 'p', acct: 'a', date: '2026-10-09', amt: -2965, ik: 'a|old|1', bank: 'POS 09/10 TRADINGVIEWA*PRODUCT WESTERVILLE' };
+  const out = E.classifyImport('a', [bank('2026-10-09', -2965, 'V6913 09/10 TRADEMART SYDNEY 74364816282')], [pending]);
+  assert.equal(out[0].status, 'new');
+});
