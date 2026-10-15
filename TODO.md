@@ -9,6 +9,10 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Next
 
+1. [ ] **Watch the next NAB import for doubles (Dani).** On 15 Oct a Driver Foodworks $4.60 came in twice (once with the reference number, once without). Import now skips a reworded repeat, and reconcile offers to merge one. But on a test copy the import skipped it, while in Dani's budget it still came in as new. If it happens again, check whether the NAB file itself lists the line twice, and send the two lines.
+1. [ ] **Typed-in $4.60 and $240 didn't match their bank lines (Dani).** Driver Foodworks $4.60 (bank Thu 8 Oct) and Drew Splurge $240 (bank Mon 12 Oct) came in as new instead of matching what was typed. Need the typed copy's date, account and amount to see why (more than 5 days apart, a different account, a transfer or split?).
+1. [ ] **Set up Simone's ATO plan as weekly** ($205 every Friday) in Payoff plan or the account's ⋯ settings. If her budget has two 'Debt payments' groups or the ATO category twice (the old duplicate bug), delete the empty copy. Check her bar colours look right now that dark mode is off.
+1. [ ] **Guide's 'Once a week' amounts** still save a monthly target. Could make a weekly target instead (it needs a day: Friday?).
 1. [ ] **Retire the four claude.ai copies** (YABB, Test, Fresh, Redo) once Dani is happy the A6 budget matches. Download a final backup of each first. Deleting them is permanent, so it's Drew or Dani's call.
 
 ## Ideas
