@@ -1388,11 +1388,16 @@
         // bank text can sit in the note after a 🔹 (from YNAB)
         const btxt = (t) => t.bank || (String(t.memo || '').split('\uD83D\uDD39')[1] || '').trim();
         const sk = (t) => E.shopKey(btxt(t).replace(/^\s*(POS|EFTPOS|V?\d{3,5})\s+[\d/:\s]*/i, ''));
-        if (!exact && btxt(x) && btxt(y) && sk(x) !== sk(y)) continue;
-        if (both && !(exact && sk(x) === sk(y))) continue;
+        // NAB can send the same line again with its words moved about ("REF NAME SHOP" then "SHOP NAME REF"):
+        // every word of the shorter one is in the longer one
+        const words = (t) => new Set(btxt(t).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2));
+        const wx = words(x), wy = words(y), [ws, wl] = wx.size <= wy.size ? [wx, wy] : [wy, wx];
+        const sameWords = ws.size >= 2 && [...ws].every((w) => wl.has(w));
+        if (!exact && !sameWords && btxt(x) && btxt(y) && sk(x) !== sk(y)) continue;
+        if (both && !((exact && sk(x) === sk(y)) || (sameWords && gap <= 1))) continue;
         if (x.cleared === 'r' && y.cleared === 'r' && !dateOff(x) && !dateOff(y)) continue; // settled long ago
         const [a, b] = (x.ik ? 1 : 0) >= (y.ik ? 1 : 0) ? [x, y] : [y, x]; // the bank's copy first
-        out.push({ a, b, same, exact, gap, both, day: dx || dy, day2: dy && dy !== dx ? dy : null });
+        out.push({ a, b, same, exact, gap, both, sameWords, day: dx || dy, day2: dy && dy !== dx ? dy : null });
       }
     }
     return out.sort((p, q) => (q.same ? 1 : 0) - (p.same ? 1 : 0) || (p.a.date < q.a.date ? 1 : -1));
@@ -1426,7 +1431,8 @@
     return rank(y) > rank(x) ? [y, x] : [x, y];
   }
   // a transfer typed by hand and the bank's own line for it: [bank, typed], or null
-  const xferPair = (x, y) => (x.ik && !x.pair && y.pair && !y.ik ? [x, y] : y.ik && !y.pair && x.pair && !x.ik ? [y, x] : null);
+  // (the typed one may already hold a bank line too, when the bank sent the same line twice: it keeps both keys)
+  const xferPair = (x, y) => (x.ik && !x.pair && y.pair ? [x, y] : y.ik && !y.pair && x.pair ? [y, x] : null);
   function mergeProblem(x, y) {
     if (x.acct !== y.acct) return "They're in different accounts.";
     if ((x.pair || y.pair) && !xferPair(x, y)) return 'One is a transfer. Delete the extra one instead.';
@@ -1445,19 +1451,23 @@
     let act = '';
     if (ids.length === 2) {
       const [k, d] = keeperOf(ts[0], ts[1]), bad = mergeProblem(k, d);
-      const note = bad || (k.amt !== d.amt ? `The amounts differ: keeps ${signed(k.amt)}${k.ik ? ' from the bank' : ''}.` : k.ik && d.ik ? 'Both came from the bank, so check they really are the same purchase.' : xferPair(k, d) ? `Keeps the bank's copy from ${dateLabel(k.date)}, as your transfer.` : `Keeps the ${k.ik ? "bank's copy" : 'copy'} from ${dateLabel(k.date)} with the category, note and payee from both.`);
-      act = `<span class="mb-note${bad ? ' bad' : ''}">${esc(note)}</span>${bad ? '' : `<button class="btn sm primary" data-action="multi-merge">Merge into one</button>`}`;
+      const note = bad || (k.amt !== d.amt ? `The amounts differ: keeps ${signed(k.amt)}${k.ik ? ' from the bank' : ''}.` : xferPair(k, d) ? `Keeps your transfer with the bank's details.` : k.ik && d.ik ? 'Both came from the bank, so check they really are the same purchase.' : `Keeps the ${k.ik ? "bank's copy" : 'copy'} from ${dateLabel(k.date)} with the category, note and payee from both.`);
+      act = `<div class="mb-line mb-merge"><span class="mb-note${bad ? ' bad' : ''}">${esc(note)}</span>${bad ? '' : `<button class="btn sm primary" data-action="multi-merge">Merge into one</button>`}</div>`;
     }
     const toOk = ts.filter((t) => t.match || t.approved === false), noCat = toOk.filter((t) => !t.match && !t.cat && !(t.splits && t.splits.length) && !t.transfer && !isTrack(t.acct)).length;
-    const ok = toOk.length ? `<button class="btn sm primary" data-action="multi-approve" title="${noCat ? `${noCat} of them ${noCat === 1 ? 'has' : 'have'} no category yet` : ''}">${ICON.tick} Approve ${toOk.length === ids.length ? 'all ' : ''}${toOk.length}</button>${noCat ? `<span class="mb-warn">${noCat} ${noCat === 1 ? 'has' : 'have'} no category</span>` : ''}` : '';
+    const ok = toOk.length ? `<button class="btn sm${act ? '' : ' primary'}" data-action="multi-approve" title="${noCat ? `${noCat} of them ${noCat === 1 ? 'has' : 'have'} no category yet` : ''}">${ICON.tick} Approve ${toOk.length === ids.length ? 'all ' : ''}${toOk.length}</button>${noCat ? `<span class="mb-warn">${noCat} with no category</span>` : ''}` : '';
     const del = UI.multiDel ? `<span class="mb-warn">Delete all ${ids.length}?</span><button class="btn sm danger" data-action="multi-del-yes">Yes, delete</button><button class="btn sm" data-action="multi-del-no">Keep them</button>` : `<button class="btn sm" data-action="multi-del">Delete</button>`;
+    // on a phone the change-all fields stay folded away until asked for
+    const edit = !isPhone() || UI.mbEdit;
     return `<div id="multi-bar" role="region" aria-label="Selected transactions">
-      <div class="mb-line"><b>${ids.length} selected</b><span class="muted">Total ${signed(total)}</span>${act}${ok}${del}<button class="btn sm" data-action="multi-clear">Clear</button></div>
-      <div class="mb-line mb-edit">
+      <div class="mb-line mb-head"><b>${ids.length} selected</b><span class="muted">${signed(total)}</span><button class="btn sm mb-x" data-action="multi-clear">Clear</button></div>
+      ${act}
+      <div class="mb-line mb-acts">${ok}${del}${isPhone() ? `<button class="btn sm mb-more" data-action="multi-edit" aria-expanded="${edit}">${edit ? 'Hide changes' : 'Change all…'}</button>` : ''}</div>
+      ${edit ? `<div class="mb-line mb-edit">
         <span class="mb-f"><input id="mb-payee" data-payee="1" ${isPhone() ? 'readonly ' : ''}placeholder="New payee for all" autocomplete="off" data-live="0" aria-label="Payee for all of them"><button class="btn sm" data-action="multi-payee">Set payee</button></span>
         <span class="mb-f"><select id="mb-cat" aria-label="Category for all of them"><option value="">Set category for all&hellip;</option>${catOptions('', { blank: false, forTx: true })}</select></span>
-        <span class="mb-f mb-n"><input id="mb-note" placeholder="Note" autocomplete="off" data-live="0" aria-label="Note for all of them"><button class="btn sm" data-action="multi-note" data-how="set">Replace notes</button><button class="btn sm" data-action="multi-note" data-how="add">Add to notes</button></span>
-      </div></div>`;
+        <span class="mb-f mb-n"><input id="mb-note" placeholder="Note" autocomplete="off" data-live="0" aria-label="Note for all of them"><span class="mb-nb"><button class="btn sm" data-action="multi-note" data-how="set">Replace notes</button><button class="btn sm" data-action="multi-note" data-how="add">Add to notes</button></span></span>
+      </div>` : ''}</div>`;
   }
   // change every picked transaction at once: one undo step
   async function multiChange(fn, what) {
@@ -1481,7 +1491,7 @@
   async function mergeXfer(bank, typed) {
     const plan = recFixPlan({ kind: 'transfer', ts: [typed], bs: [bank] });
     S.newStep(); await putTxs(plan.puts, plan.removes); S.newStep();
-    toast(`Merged into one: kept the bank's copy as a transfer ${bank.amt < 0 ? 'to' : 'from'} ${acctName(typed.transfer)}. ${MAC ? '⌘Z' : 'Ctrl+Z'} to undo.`);
+    toast(`Merged into one: your transfer ${bank.amt < 0 ? 'to' : 'from'} ${acctName(typed.transfer)} now has the bank's details. ${MAC ? '⌘Z' : 'Ctrl+Z'} to undo.`);
     render();
   }
   async function notDouble(aId, bId) {
@@ -1679,10 +1689,10 @@
   function dblRow(p) {
     const key = `dbl:${p.a.id}:${p.b.id}`, open = UI.ckOpen === key;
     const can = !((p.a.pair || p.b.pair) && !xferPair(p.a, p.b));
-    const name = esc(p.a.payee || p.b.payee || tidyPayee(p.a.bank || p.b.bank) || 'No payee');
+    const xf = xferPair(p.a, p.b), name = esc((xf && xf[1].payee) || p.a.payee || p.b.payee || tidyPayee(p.a.bank || p.b.bank) || 'No payee');
     const who = (t) => (t.ik ? 'Bank' : 'Manual'), when = `${who(p.b)} ${dateLabel(p.b.date)} → ${who(p.a)} ${dateLabel(p.a.date)}`;
     const half = (t) => `<div class="ck-cr"><span class="ck-cl">${t.ik ? 'Bank' : 'Manual'}</span><span class="ck-cn">${esc(t.payee || 'No payee')} · ${esc(catLabel(t) || 'Uncategorized')}${t.memo ? ` · <i>${esc(t.memo)}</i>` : ''}<small>${esc(dateLabel(t.date))}${t.cleared === 'r' ? ' · reconciled' : ''}</small>${t.bank ? `<small class="mono">${esc(t.bank)}</small>` : ''}</span><b>${esc(money(Math.abs(t.amt)))}</b></div>`;
-    const why = p.both ? `Both came from bank files and say ${dateLabel(p.day)}, and the account is out by exactly this much: the bank sent the same line twice.`
+    const why = p.both ? `Both came from bank files ${p.day ? `and say ${dateLabel(p.day)}` : 'with the same words'}, and the account is out by exactly this much: the bank sent the same line twice.`
       : p.exact ? `Both bank descriptions say ${dateLabel(p.day)}.` : p.same ? "The bank descriptions are a day apart. That happens when a pending line becomes the final one." : '';
     const keep = `<button class="btn sm" data-action="dbl-not" data-a="${p.a.id}" data-b="${p.b.id}">Not the Same</button>`;
     return `<div class="ck-row${open ? ' open' : ''}">
@@ -1692,7 +1702,7 @@
           <span class="ck-d">${esc(when)}</span>
         </button>
         <div class="ck-side">${can ? `<button class="ck-tick" data-action="dbl-merge" data-a="${p.a.id}" data-b="${p.b.id}" aria-label="Match them as one" title="Match them as one">${ICON.tick}</button>` : ''}</div>
-        ${open ? `<div class="ck-more">${half(p.a)}${half(p.b)}${why ? `<p class="ck-why">${esc(why)}</p>` : ''}<p class="ck-why">${can ? `Matching keeps ${p.a.ik ? "the bank's copy" : 'one'} and adds the category, note and payee from the other.` : 'One is a transfer, so delete the extra one by hand if they are the same.'}</p>
+        ${open ? `<div class="ck-more">${half(p.a)}${half(p.b)}${why ? `<p class="ck-why">${esc(why)}</p>` : ''}<p class="ck-why">${xf ? "Matching keeps your transfer and adds the bank's details." : can ? `Matching keeps ${p.a.ik ? "the bank's copy" : 'one'} and adds the category, note and payee from the other.` : 'One is a transfer, so delete the extra one by hand if they are the same.'}</p>
           <div class="ck-btns">${can ? `<button class="btn sm primary" data-action="dbl-merge" data-a="${p.a.id}" data-b="${p.b.id}">${ICON.tick} Match</button>` : ''}${keep}</div></div>` : ''}
       </div>`;
   }
@@ -3944,6 +3954,7 @@
     reconcile: (el) => openImport(el.dataset.id),
     'rec-flow': () => openImport(),
     'ie-cal': () => { const p = $('#ie-date-pick'); if (!p) return; p.value = isoOr($('#ie-date').value, p.value); try { p.showPicker(); } catch (e) { p.focus(); p.click(); } },
+    'multi-edit': () => { UI.mbEdit = !UI.mbEdit; render(); },
     'multi-clear': () => { UI.multi = null; if (UI.pick) UI.sel = null; render(); },
     'pick-mode': () => { UI.pick = !UI.pick; UI.sel = null; UI.multi = null; UI.peekTx = null; UI.multiDel = false; render(); },
     // Select mode on a phone: each tap adds or takes out one row
