@@ -75,3 +75,21 @@ test("NAB's real wording: the same line again without its reference number, proc
   const out = E.classifyImport('a', [{ date: '2026-10-08', posted: '2026-10-12', amt: -460, desc: 'V1234 08/10 DRIVER FOODWORKS GRIFFITH' }], [earlier]);
   assert.equal(out[0].status, 'dupe');
 });
+
+test('an ATM line with no dd/mm comes back with a new processing date: skipped as already in', () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-15', amt: -10000, ik: 'a|2026-10-15|-10000|nabatm csh griffith|1', bank: 'NABATM CSH 15th09:09GRIFFITH', transfer: 'c', pair: 'cp' };
+  const out = E.classifyImport('a', [bank('2026-10-16', -10000, 'NABATM CSH 15th09:09GRIFFITH')], [earlier]);
+  assert.equal(out[0].status, 'dupe');
+});
+
+test('a transfer in comes back with its words moved about and cut short: skipped as already in', () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-15', amt: 1, ik: 'a|2026-10-14|1|w drew|1', bank: 'w2297-585786a69cab Drew James Pfitzner SANDHURST TRUSTE' };
+  const out = E.classifyImport('a', [bank('2026-10-15', 1, 'w2297-585786a69cab SANDHURST TRUSTE Drew James Pfitz')], [earlier]);
+  assert.equal(out[0].status, 'dupe');
+});
+
+test('two ATM withdrawals at different times are two withdrawals', () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-15', amt: -10000, ik: 'a|2026-10-15|-10000|x|1', bank: 'NABATM CSH 15th09:09GRIFFITH' };
+  const out = E.classifyImport('a', [bank('2026-10-16', -10000, 'NABATM CSH 16th11:42GRIFFITH')], [earlier]);
+  assert.equal(out[0].status, 'new');
+});

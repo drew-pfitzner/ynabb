@@ -1370,14 +1370,14 @@
   function recPairs(acct, outBy) {
     const byAmt = {};
     D.tx.forEach((t) => { if (t.acct === acct) (byAmt[t.amt] = byAmt[t.amt] || []).push(t); });
-    const out = [];
+    const out = [], twice = [];
     for (const k in byAmt) {
       const g = byAmt[k];
       if (g.length < 2) continue;
       for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) {
         const x = g[i], y = g[j];
         const both = !!(x.ik && y.ik);
-        if (both && !(outBy && Math.abs(x.amt) === Math.abs(outBy))) continue; // two lines from the bank are two real transactions
+        if (both && !outBy) continue; // two lines from the bank are two real transactions
         if (x.pair && y.pair) continue;
         if ((x.notWith || []).includes(y.id) || (y.notWith || []).includes(x.id)) continue;
         const dx = descDate(x), dy = descDate(y);
@@ -1388,18 +1388,18 @@
         // bank text can sit in the note after a 🔹 (from YNAB)
         const btxt = (t) => t.bank || (String(t.memo || '').split('\uD83D\uDD39')[1] || '').trim();
         const sk = (t) => E.shopKey(btxt(t).replace(/^\s*(POS|EFTPOS|V?\d{3,5})\s+[\d/:\s]*/i, ''));
-        // NAB can send the same line again with its words moved about ("REF NAME SHOP" then "SHOP NAME REF"):
-        // every word of the shorter one is in the longer one
-        const words = (t) => new Set(btxt(t).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2));
-        const wx = words(x), wy = words(y), [ws, wl] = wx.size <= wy.size ? [wx, wy] : [wy, wx];
-        const sameWords = ws.size >= 2 && [...ws].every((w) => wl.has(w));
+        const sameWords = E.sameWords(btxt(x), btxt(y));
         if (!exact && !sameWords && btxt(x) && btxt(y) && sk(x) !== sk(y)) continue;
         if (both && !((exact && sk(x) === sk(y)) || (sameWords && gap <= 1))) continue;
         if (x.cleared === 'r' && y.cleared === 'r' && !dateOff(x) && !dateOff(y)) continue; // settled long ago
         const [a, b] = (x.ik ? 1 : 0) >= (y.ik ? 1 : 0) ? [x, y] : [y, x]; // the bank's copy first
-        out.push({ a, b, same, exact, gap, both, sameWords, day: dx || dy, day2: dy && dy !== dx ? dy : null });
+        (both ? twice : out).push({ a, b, same, exact, gap, both, sameWords, day: dx || dy, day2: dy && dy !== dx ? dy : null });
       }
     }
+    // the same line imported twice only counts when it explains how far out it is: one on its own,
+    // or all of them together (an ATM $100 and a $0.01 both doubled leave it out by $99.99)
+    const one = twice.filter((p) => Math.abs(p.a.amt) === Math.abs(outBy));
+    out.push(...(one.length ? one : Math.abs(twice.reduce((n, p) => n + p.a.amt, 0)) === Math.abs(outBy || 0) ? twice : []));
     return out.sort((p, q) => (q.same ? 1 : 0) - (p.same ? 1 : 0) || (p.a.date < q.a.date ? 1 : -1));
   }
   function recFlags(acct) {
@@ -1692,7 +1692,7 @@
     const xf = xferPair(p.a, p.b), name = esc((xf && xf[1].payee) || p.a.payee || p.b.payee || tidyPayee(p.a.bank || p.b.bank) || 'No payee');
     const who = (t) => (t.ik ? 'Bank' : 'Manual'), when = `${who(p.b)} ${dateLabel(p.b.date)} → ${who(p.a)} ${dateLabel(p.a.date)}`;
     const half = (t) => `<div class="ck-cr"><span class="ck-cl">${t.ik ? 'Bank' : 'Manual'}</span><span class="ck-cn">${esc(t.payee || 'No payee')} · ${esc(catLabel(t) || 'Uncategorized')}${t.memo ? ` · <i>${esc(t.memo)}</i>` : ''}<small>${esc(dateLabel(t.date))}${t.cleared === 'r' ? ' · reconciled' : ''}</small>${t.bank ? `<small class="mono">${esc(t.bank)}</small>` : ''}</span><b>${esc(money(Math.abs(t.amt)))}</b></div>`;
-    const why = p.both ? `Both came from bank files ${p.day ? `and say ${dateLabel(p.day)}` : 'with the same words'}, and the account is out by exactly this much: the bank sent the same line twice.`
+    const why = p.both ? `Both came from bank files ${p.day ? `and say ${dateLabel(p.day)}` : 'with the same words'}, and that explains how far out it is: the bank sent the same line twice.`
       : p.exact ? `Both bank descriptions say ${dateLabel(p.day)}.` : p.same ? "The bank descriptions are a day apart. That happens when a pending line becomes the final one." : '';
     const keep = `<button class="btn sm" data-action="dbl-not" data-a="${p.a.id}" data-b="${p.b.id}">Not the Same</button>`;
     return `<div class="ck-row${open ? ' open' : ''}">
@@ -1826,7 +1826,7 @@
     if (it.kind === 'parts') return { puts: it.bs.map((b) => approvedIf(carryInto(b, Object.assign({}, t, { splits: null })))), removes: [t] };
     if (it.kind === 'transfer') {
       const b = it.bs[0], p = D.txById[t.pair];
-      const k = Object.assign(carryInto(b, Object.assign({}, t, { cat: null })), { transfer: t.transfer, pair: p ? p.id : null, cat: null, splits: null, approved: true });
+      const k = Object.assign(carryInto(b, Object.assign({}, t, { cat: null })), { payee: t.payee || b.payee, transfer: t.transfer, pair: p ? p.id : null, cat: null, splits: null, approved: true }); // your transfer's name, not the bank's
       return { puts: p ? [k, Object.assign({}, p, { amt: -b.amt, pair: b.id, date: b.date })] : [k], removes: [t] };
     }
     if (it.kind === 'joined') {
