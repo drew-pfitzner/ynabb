@@ -608,6 +608,15 @@
       .replace(/\s+[a-z]{3}\s+[\d,]+\.\d{2}\s*$/, '')
       .replace(/[^a-z0-9]+/g, '');
   }
+  // NAB can send the same line again with its words moved about or cut short ("REF DREW JAMES PFITZNER SANDHURST"
+  // then "REF SANDHURST DREW JAMES PFITZ"): every word of the shorter one is in the other, or starts one of its words
+  function sameWords(a, b) {
+    const w = (d) => [...new Set(String(d || '').toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length > 2))];
+    let [s, l] = [w(a), w(b)];
+    if (s.length > l.length) [s, l] = [l, s];
+    const hit = (x, y) => x === y || (x.length >= 4 && y.length >= 4 && (x.startsWith(y) || y.startsWith(x)));
+    return s.length >= 2 && s.every((x) => l.some((y) => hit(x, y)));
+  }
   const commonStart = (a, b) => { let n = 0; while (n < a.length && a[n] === b[n]) n++; return n; };
   function classifyImport(acctId, rows, existing) {
     const byIk = new Set();
@@ -663,6 +672,15 @@
         && Math.abs((Date.parse(x.date) - Date.parse(r.date)) / 864e5) <= 3);
       if (t) { used.add(t.id); out[i] = Object.assign({}, r, { status: 'dupe', dupeOf: t.id }); }
     });
+    // Lines with no dd/mm written in them (ATM, transfers in) can come back the same way with a new processing date.
+    // The exact amount, the same words and within 2 days is that line. A different ATM time or reference makes different words.
+    out.forEach((r, i) => {
+      if (r.status !== 'new' || isPending(r.desc) || dayMonth(r.desc)) return;
+      const t = imported.find((x) => !used.has(x.id) && x.amt === r.amt && x.bank && !isPending(x.bank) && !dayMonth(x.bank)
+        && !fileIks.has(x.ik) && !(x.iks || []).some((k) => fileIks.has(k)) && sameWords(r.desc, x.bank)
+        && Math.abs((Date.parse(x.date) - Date.parse(r.date)) / 864e5) <= 2);
+      if (t) { used.add(t.id); out[i] = Object.assign({}, r, { status: 'dupe', dupeOf: t.id }); }
+    });
     // Match bank lines to entries typed by hand. Every possible pair is scored first, and the closest pairs are taken first
     // across the whole file: going line by line, an earlier $4.60 could take the entry that belongs to a later $4.60
     // a few days away, leaving the right line to come in as a double.
@@ -700,7 +718,7 @@
   const api = {
     INCOME, START, monthOf, addMonths, monthDiff, todayISO, parseMoney, buildTree, descendants, txParts,
     dayMonth, dmNear, targetInfo, computeMonth, planAutoAssign, monthlyOf, subtreeMonthly, checkTargets, accountBalances, descKey, parseCSV, parseDate,
-    guessDateFormat, parseOFX, parseQIF, classifyImport, dateFromDesc, shopKey, isPending,
+    guessDateFormat, parseOFX, parseQIF, classifyImport, dateFromDesc, shopKey, isPending, sameWords,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Engine = api;
