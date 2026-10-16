@@ -1452,15 +1452,15 @@
     if (ids.length === 2) {
       const [k, d] = keeperOf(ts[0], ts[1]), bad = mergeProblem(k, d);
       const note = bad || (k.amt !== d.amt ? `The amounts differ: keeps ${signed(k.amt)}${k.ik ? ' from the bank' : ''}.` : xferPair(k, d) ? `Keeps your transfer with the bank's details.` : k.ik && d.ik ? 'Both came from the bank, so check they really are the same purchase.' : `Keeps the ${k.ik ? "bank's copy" : 'copy'} from ${dateLabel(k.date)} with the category, note and payee from both.`);
-      act = `<div class="mb-line mb-merge"><span class="mb-note${bad ? ' bad' : ''}">${esc(note)}</span>${bad ? '' : `<button class="btn sm primary" data-action="multi-merge">Merge into one</button>`}</div>`;
+      act = `<div class="mb-line mb-merge">${bad ? '' : `<button class="btn sm primary" data-action="multi-merge">Merge into one</button>`}<span class="mb-note${bad ? ' bad' : ''}">${esc(note)}</span></div>`;
     }
     const toOk = ts.filter((t) => t.match || t.approved === false), noCat = toOk.filter((t) => !t.match && !t.cat && !(t.splits && t.splits.length) && !t.transfer && !isTrack(t.acct)).length;
-    const ok = toOk.length ? `<button class="btn sm${act ? '' : ' primary'}" data-action="multi-approve" title="${noCat ? `${noCat} of them ${noCat === 1 ? 'has' : 'have'} no category yet` : ''}">${ICON.tick} Approve ${toOk.length === ids.length ? 'all ' : ''}${toOk.length}</button>${noCat ? `<span class="mb-warn">${noCat} with no category</span>` : ''}` : '';
+    const ok = toOk.length ? `<button class="btn sm${act ? '' : ' primary'}" data-action="multi-approve" title="${noCat ? `${noCat} of them ${noCat === 1 ? 'has' : 'have'} no category yet` : ''}">${ICON.tick} Approve ${toOk.length === ids.length ? 'all ' : ''}${toOk.length}</button>${noCat && !isPhone() ? `<span class="mb-warn">${noCat} with no category</span>` : ''}` : '';
     const del = UI.multiDel ? `<span class="mb-warn">Delete all ${ids.length}?</span><button class="btn sm danger" data-action="multi-del-yes">Yes, delete</button><button class="btn sm" data-action="multi-del-no">Keep them</button>` : `<button class="btn sm" data-action="multi-del">Delete</button>`;
     // on a phone the change-all fields stay folded away until asked for
     const edit = !isPhone() || UI.mbEdit;
     return `<div id="multi-bar" role="region" aria-label="Selected transactions">
-      <div class="mb-line mb-head"><b>${ids.length} selected</b><span class="muted">${signed(total)}</span><button class="btn sm mb-x" data-action="multi-clear">Clear</button></div>
+      ${isPhone() ? '' : `<div class="mb-line mb-head"><b>${ids.length} selected</b><span class="muted">${signed(total)}</span><button class="btn sm mb-x" data-action="multi-clear">Clear</button></div>`}
       ${act}
       <div class="mb-line mb-acts">${ok}${del}${isPhone() ? `<button class="btn sm mb-more" data-action="multi-edit" aria-expanded="${edit}">${edit ? 'Hide changes' : 'Change all…'}</button>` : ''}</div>
       ${edit ? `<div class="mb-line mb-edit">
@@ -2026,7 +2026,7 @@
       ${phoneChips}${sumBits ? `<div class="tx-sum">
         <div class="ts-l">
           ${isPhone() ? '' : chips}
-          <span class="ts-count${activeFilters || UI.q || UI.only || UI.pick ? '' : ' plain'}">${UI.pick && isPhone() ? (nPicked ? 'Tap another one to go with it' : 'Tap the transactions to select them') : UI.only ? (UI.onlyWhat === 'balance' ? 'Hover over a red-underlined amount to see why it could explain the difference.' : list.length > 1 ? `${list.length} transactions with the same amount as another within a few days. If any are the same purchase, delete the extra.` : 'Only one left, so no double-up here now.') : activeFilters || UI.q ? `Showing ${list.length} of ${D.tx.length} &middot; totalling <b class="${total > 0 ? 'pos' : ''}">${signed(total)}</b>` : `${list.length} ${list.length === 1 ? 'transaction' : 'transactions'}`}</span>
+          <span class="ts-count${activeFilters || UI.q || UI.only || UI.pick ? '' : ' plain'}">${UI.pick && isPhone() ? (nPicked > 1 ? `<b>${nPicked} selected</b> · ${signed(picked().reduce((n, x) => n + D.txById[x].amt, 0))}` : nPicked ? 'Tap another one to go with it' : 'Tap the transactions to select them') : UI.only ? (UI.onlyWhat === 'balance' ? 'Hover over a red-underlined amount to see why it could explain the difference.' : list.length > 1 ? `${list.length} transactions with the same amount as another within a few days. If any are the same purchase, delete the extra.` : 'Only one left, so no double-up here now.') : activeFilters || UI.q ? `Showing ${list.length} of ${D.tx.length} &middot; totalling <b class="${total > 0 ? 'pos' : ''}">${signed(total)}</b>` : `${list.length} ${list.length === 1 ? 'transaction' : 'transactions'}`}</span>
         </div>
         <div class="ts-r">
           ${matches ? `<span class="hint">${matches} matched ${matches === 1 ? 'transaction needs' : 'transactions need'} approving one by one</span>` : ''}
