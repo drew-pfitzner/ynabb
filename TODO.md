@@ -15,6 +15,21 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 1. [ ] **Guide's 'Once a week' amounts** still save a monthly target. Could make a weekly target instead (it needs a day: Friday?).
 1. [ ] **Retire the four claude.ai copies** (YABB, Test, Fresh, Redo) once Dani is happy the A6 budget matches. Download a final backup of each first. Deleting them is permanent, so it's Drew or Dani's call.
 
+### From the 17 Oct check-over (Drew), most important first
+
+1. [ ] **Import can skip a real repeat line.** A line with no dd/mm in it (e.g. a $10 transfer on Mon and again on Tue) is skipped as "already in" when the new file starts after the first one (`engine.js` ~695; the 3-day dd/mm rule at ~670 is similar). Only call it a re-send when the earlier line's date is inside the new file's dates but missing from it.
+1. [ ] **Changes can vanish on a weak signal.** After two failed saves `store.js` (~244) drops the change; the screen shows it until the next reconnect, then it's gone, and the leave-page warning doesn't catch it. Keep unsaved changes queued (and in the browser) and keep retrying.
+1. [ ] **Safety copy before big replaces.** Restore, Start fresh (guide) and Move from YNAB don't take a backup first, and restore has no error handling: it replaces documents one by one, so a dropped connection leaves half a budget (`app.js` ~3810). Have the server snapshot first and restore in one go.
+1. [ ] **Backup before each deploy** in `deploy/auto-deploy.ps1`. Later: an admin "put the budget back to 3pm" tool using the `changes` table.
+1. [ ] **Login lock-outs:** count wrong passwords per username *and* address, so a stranger can't keep a family login locked.
+1. [ ] **Close the live-update connection** when a device signs out, its password changes or its session ends (`server.js` ~438).
+1. [ ] **Warn the admin in the app** when the nightly backup is overdue or failed (today it's only on the admin page).
+1. [ ] **Weekly and monthly backups** only happen if the run lands on a Sunday or the 1st (`backup.js` ~95). Make one whenever the last is over 7 days (or a month) old.
+1. [ ] **Two-factor login on both GitHub accounts** (whatever merges goes live). Optionally pin the Docker and Actions versions (`tailscale:stable` floats).
+1. [ ] **Tests for the budget sums** (`computeMonth`: carry-forward, overspending, Ready to Assign, targets).
+1. [ ] **Undo can wipe the other person's edit** made to the same transaction since. Skip the undo (or ask) when it has changed.
+1. [ ] **Small tidy-ups:** clear expired sessions; a mistyped web address gives a server error instead of "not found".
+
 ## Ideas
 
 - After 12 Oct 2026: delete the old Docker volumes `yabb_yabb-data` and `yabb_tailscale-state` on the A6 (kept as a safety net after the rename). Never start them again: the Tailscale one is the same device as `ynabb`.
