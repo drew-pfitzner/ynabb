@@ -4,7 +4,6 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Now
 
-- [x] **Dani: get set up** with `docs/GETTING-STARTED.md` (invite sent 5 Oct; YNABB login made) (Dani)
 - [ ] **Test-open one iCloud backup on the Mac** with the key from the password manager (`node server/backup.js decrypt`), to prove a restore works away from the A6.
 
 ## Next
@@ -18,7 +17,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 ### From the 17 Oct check-over (Drew), most important first
 
 1. [ ] **Warn the admin in the app** when the nightly backup is overdue or failed (today it's only on the admin page).
-1. [ ] **Two-factor login on both GitHub accounts** (whatever merges goes live). Optionally pin the Docker and Actions versions (`tailscale:stable` floats).
+1. [ ] **Drew and Dani, not Claude: two-factor login on both GitHub accounts** (whatever merges goes live). Optionally pin the Docker and Actions versions (`tailscale:stable` floats).
 1. [ ] **Undo can wipe the other person's edit** made to the same transaction since. Skip the undo (or ask) when it has changed.
 
 ## Ideas
@@ -32,6 +31,8 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-17: **Docs brought up to date** with the check-over changes (server, architecture, testing, self-hosting, project context).
+- 2026-10-17: **Dani got set up** with `docs/GETTING-STARTED.md` (ticked off in Now).
 - 2026-10-17: **Put the budget back to an earlier time (Drew).** In Settings, under Recent imports: pick a time and press **See what changes** to compare then and now (transactions, total, accounts, categories, and who changed things since), then put it back. The little **?** explains it. Either of you can use it on your own budget. YNABB rebuilds the budget from its log of every change, and refuses if that log can't fully explain the budget as it is now. A copy of the current budget is kept first (Settings › Budget before the last put back).
 - 2026-10-17: **Backup before each deploy (Drew).** Auto-deploy now takes the app's usual encrypted backup (kept in its own `deploy` folder, last 10, copied to iCloud) before updating. If that fails it stays on the old version and tries again in 30 minutes. If the app is down, it updates anyway, since the update may be the fix.
 - 2026-10-17: **Weekly and monthly backups catch up (Drew).** A weekly copy is made whenever the newest is 7 or more days old, and a monthly one whenever this month has none yet, instead of only on Sundays and the 1st.

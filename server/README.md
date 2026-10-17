@@ -7,7 +7,9 @@ One file (`server.js`), no npm packages: Node 22.13 or newer, using its built-in
   - Sessions end after 14 days unused or 90 days total. Expired ones are cleared every minute (and at start-up), and a device that signs out, changes password or expires has its live-update connection closed.
 - **Separate budgets.** Each person belongs to one budget. Admins can open any budget from `/account`.
 - **The document API** `store.js` uses: `GET /api/events` (the whole budget, then live changes), `PATCH`/`PUT /api/doc/:coll/:id`, and receipts at `POST /api/blob` and `GET /_blob/:id`.
-- **A change log.** Every write goes into the `changes` table and is never deleted. A replace (restore) also keeps the document it replaced.
+- **Whole-budget replace:** `PUT /api/budget` (restore, start fresh, move from YNAB). It saves a safety copy of the budget first (`safety_copies` table, last 10 per budget), then swaps every document in one transaction and sends open pages a fresh snapshot. `GET /api/safety-copy` downloads the newest copy as an ordinary backup file.
+- **A change log.** Every write goes into the `changes` table and is never deleted. A replace also keeps the document it replaced.
+- **Put back to an earlier time:** `GET /api/rewind?ts=` compares the budget then and now; `POST /api/rewind {ts}` puts it back (with a safety copy first). It replays the change log up to that time, and refuses (409) unless replaying the whole log gives exactly today's budget.
 - **`/account`** for everyone (password, sign out), with the admin tools (budgets, people, sign-in log) for admins.
 
 ## Run it on your computer
@@ -31,4 +33,4 @@ Data goes in `data/` (gitignored): `ynabb.sqlite` plus `blobs/` for receipts. De
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME` | | On first start with no logins, creates the super admin and a "Family" budget. |
 | `APP_VERSION` | `dev` | Shown on the account page, so you can see which version is live. |
 
-Emergency only (needs a shell on the server): `node server/server.js reset-password <username>`.
+Emergency only (needs a shell on the server): `node server/server.js reset-password <username>`. Auto-deploy uses `node server/server.js backup-now` to take a backup before each update.

@@ -26,7 +26,7 @@ Add a third backend to `store.js` (it was designed for this; see the comment at 
 1. **Load everything:** `GET /api/data` returns `{meta: {...}, months: {...}, tx: {...}}`. The data is small: a whole year is a few MB at most.
 2. **Patch a document:** `PATCH /api/doc/:coll/:id` with a JSON body applied as an RFC 7386 JSON Merge Patch. Nested objects merge, and `null` deletes a key. This is exactly what `Store.write` does locally (`deepMerge` plus `stripNulls`).
    - **Merge on the server**, not by sending whole documents. Two people editing transactions in the same month write the same `tx/YYYY-MM` document, and whole-document saves would lose one person's change.
-3. **Replace a document:** `PUT /api/doc/:coll/:id`. Restore from backup uses it.
+3. **Replace a document:** `PUT /api/doc/:coll/:id`. YNABB's own server also has `PUT /api/budget`, which restore uses to swap the whole budget at once (see `server/README.md`).
 4. **Live updates:** `GET /api/events` as Server-Sent Events, sending `{coll, id, doc}` after every change. In `store.js`, apply it the same way the `onSnapshot` handler does: keep local queued edits on top.
 5. **Receipts:**
    - `POST /api/blob` stores the file and returns `{id}`.
@@ -45,7 +45,7 @@ Add a third backend to `store.js` (it was designed for this; see the comment at 
 
 - **Security:** it's family financial data. Use HTTPS only, require login, never expose the API unauthenticated, and back up the SQLite file or database nightly.
 - **Keep optimistic writes:** `Store.write` updates the screen immediately and queues the network write per document. Keep that, along with the retry on `unavailable` and the error messages.
-- **Offline:** optional. The queue already holds unsent patches in memory; persisting them to localStorage would make it survive a reload.
+- **Offline:** on YNABB's server, unsent patches already keep retrying and are kept in localStorage, so they survive a reload.
 - **Moving the data:**
   - Download a backup from the live claude.ai app and restore it into the new host.
   - Receipts aren't in the backup. If they matter, a Claude Code session can list them with the Artifact tool's `list_assets` and save them with `read_asset` on the real artifact, then upload them to the new blob store, keeping the ids so `tx.receipt` still points at them.
