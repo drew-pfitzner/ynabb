@@ -32,4 +32,4 @@ Real NAB exports (CSV preferred) have these columns: Date, Amount, Account Numbe
 
 ## Checking logic without a browser
 
-`engine.js` has no DOM, so you can load it in Node and call `Engine.computeMonth(...)` or `Engine.classifyImport(...)` directly. See `tools/rtachk.js`, which checks Ready to Assign per month against a database dump. It was written for macOS `osascript`; port it to Node with `require`/`fs`. A proper unit test suite for `engine.js` would be a good early job.
+`engine.js` has no DOM, so you can load it in Node and call `Engine.computeMonth(...)` or `Engine.classifyImport(...)` directly. See `tools/rtachk.js`, which checks Ready to Assign per month against a database dump. It was written for macOS `osascript`; port it to Node with `require`/`fs`. `npm test` also runs engine tests: `server/test/import-match.test.js` (import matching) and `server/test/budget-sums.test.js` (carry-forward, overspending, Ready to Assign, splits, transfers, cards and targets).

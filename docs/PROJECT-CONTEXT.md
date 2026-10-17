@@ -59,7 +59,7 @@ These claude.ai copies still carry the old YABB titles. All four run the same co
 **Other**
 - YNAB import from YNAB's export zip, including history, assignments and "moves".
 - A step-by-step setup guide and lessons (`guide.js`), and a phone layout toggle.
-- Backup and restore (JSON), transactions CSV export, and one light colour scheme (it no longer follows the device's dark mode, so everyone sees the same colours).
+- Backup and restore (JSON), with a safety copy kept before any restore, start fresh or YNAB move; **Put the budget back to an earlier time** (Settings, under Recent imports), rebuilt from the server's log of every change; transactions CSV export, and one light colour scheme (it no longer follows the device's dark mode, so everyone sees the same colours).
 
 ## Timeline
 
@@ -75,6 +75,7 @@ These claude.ai copies still carry the old YABB titles. All four run the same co
   - Range and ⌘ selection with bulk edits; the Redo copy; this handover.
 
 - **5 Oct:** moved to its own server on the A6 (logins, separate budgets, backups, auto-deploy), and renamed **YNABB**: "Yikes Not Another Bloody Budget".
+- **17 Oct:** a check-over of safety: edits survive a weak signal, restores happen in one go with a safety copy, put the budget back to an earlier time, safer sign-ins, backups that catch up and run before each update, and tests for the budget sums.
 
 ## Ideas parked for later
 
