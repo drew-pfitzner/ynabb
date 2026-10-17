@@ -617,6 +617,13 @@
     const hit = (x, y) => x === y || (x.length >= 4 && y.length >= 4 && (x.startsWith(y) || y.startsWith(x)));
     return s.length >= 2 && s.every((x) => l.some((y) => hit(x, y)));
   }
+  // NAB writes an ATM withdrawal as "ATM 15/10 09:09 280-282 BANNA AVE GRIFFITH" at first and "NABATM CSH 15th09:09GRIFFITH"
+  // once it clears. The day and time are all the two share, so they make the key.
+  function atmKey(desc) {
+    const s = String(desc || '');
+    const m = s.match(/^\s*ATM\s+(\d{1,2})\/\d{1,2}\s+(\d{1,2}):(\d{2})\b/i) || s.match(/^\s*NABATM\s+[A-Z]+\s+(\d{1,2})(?:st|nd|rd|th)\s*(\d{1,2}):(\d{2})/i);
+    return m ? `${+m[1]}|${+m[2]}:${m[3]}` : null;
+  }
   const commonStart = (a, b) => { let n = 0; while (n < a.length && a[n] === b[n]) n++; return n; };
   function classifyImport(acctId, rows, existing) {
     const byIk = new Set();
@@ -672,6 +679,16 @@
         && Math.abs((Date.parse(x.date) - Date.parse(r.date)) / 864e5) <= 3);
       if (t) { used.add(t.id); out[i] = Object.assign({}, r, { status: 'dupe', dupeOf: t.id }); }
     });
+    // an ATM withdrawal imported in its first wording, now in its final one: the entry takes the final line, like a pending purchase
+    out.forEach((r, i) => {
+      const key = r.status === 'new' && atmKey(r.desc);
+      if (!key) return;
+      const t = imported.find((x) => !used.has(x.id) && x.amt === r.amt && atmKey(x.bank) === key && !fileIks.has(x.ik)
+        && !(x.iks || []).some((k) => fileIks.has(k)) && Math.abs((Date.parse(x.date) - Date.parse(r.date)) / 864e5) <= 3);
+      if (!t) return;
+      used.add(t.id); // the very same wording sent again is simply already in
+      out[i] = Object.assign({}, r, sameWords(r.desc, t.bank) ? { status: 'dupe', dupeOf: t.id } : { status: 'update', updateId: t.id });
+    });
     // Lines with no dd/mm written in them (ATM, transfers in) can come back the same way with a new processing date.
     // The exact amount, the same words and within 2 days is that line. A different ATM time or reference makes different words.
     out.forEach((r, i) => {
@@ -718,7 +735,7 @@
   const api = {
     INCOME, START, monthOf, addMonths, monthDiff, todayISO, parseMoney, buildTree, descendants, txParts,
     dayMonth, dmNear, targetInfo, computeMonth, planAutoAssign, monthlyOf, subtreeMonthly, checkTargets, accountBalances, descKey, parseCSV, parseDate,
-    guessDateFormat, parseOFX, parseQIF, classifyImport, dateFromDesc, shopKey, isPending, sameWords,
+    guessDateFormat, parseOFX, parseQIF, classifyImport, dateFromDesc, shopKey, isPending, sameWords, atmKey,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Engine = api;

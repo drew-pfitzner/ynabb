@@ -1388,7 +1388,7 @@
         // bank text can sit in the note after a 🔹 (from YNAB)
         const btxt = (t) => t.bank || (String(t.memo || '').split('\uD83D\uDD39')[1] || '').trim();
         const sk = (t) => E.shopKey(btxt(t).replace(/^\s*(POS|EFTPOS|V?\d{3,5})\s+[\d/:\s]*/i, ''));
-        const sameWords = E.sameWords(btxt(x), btxt(y));
+        const ak = E.atmKey(btxt(x)), sameWords = E.sameWords(btxt(x), btxt(y)) || !!(ak && ak === E.atmKey(btxt(y)));
         if (!exact && !sameWords && btxt(x) && btxt(y) && sk(x) !== sk(y)) continue;
         if (both && !((exact && sk(x) === sk(y)) || (sameWords && gap <= 1))) continue;
         if (x.cleared === 'r' && y.cleared === 'r' && !dateOff(x) && !dateOff(y)) continue; // settled long ago

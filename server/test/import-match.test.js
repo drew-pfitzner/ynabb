@@ -93,3 +93,16 @@ test('two ATM withdrawals at different times are two withdrawals', () => {
   const out = E.classifyImport('a', [bank('2026-10-16', -10000, 'NABATM CSH 16th11:42GRIFFITH')], [earlier]);
   assert.equal(out[0].status, 'new');
 });
+
+test("NAB's real ATM wording: the first line and the final one are the same withdrawal", () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-15', amt: -10000, ik: 'a|2026-10-15|-10000|atm banna ave griffith|1', bank: 'ATM 15/10 09:09 280-282 BANNA AVE GRIFFITH', cleared: 'r' };
+  const out = E.classifyImport('a', [bank('2026-10-16', -10000, 'NABATM CSH 15th09:09GRIFFITH')], [earlier]);
+  assert.equal(out[0].status, 'update');
+  assert.equal(out[0].updateId, 'e');
+});
+
+test('an ATM withdrawal at another time is its own withdrawal', () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-15', amt: -10000, ik: 'a|x|1', bank: 'ATM 15/10 09:09 280-282 BANNA AVE GRIFFITH' };
+  const out = E.classifyImport('a', [bank('2026-10-16', -10000, 'NABATM CSH 15th14:40GRIFFITH')], [earlier]);
+  assert.equal(out[0].status, 'new');
+});
