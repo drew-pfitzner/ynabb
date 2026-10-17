@@ -17,14 +17,10 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ### From the 17 Oct check-over (Drew), most important first
 
-1. [ ] **Backup before each deploy** in `deploy/auto-deploy.ps1`. Later: an admin "put the budget back to 3pm" tool using the `changes` table.
-1. [ ] **Login lock-outs:** count wrong passwords per username *and* address, so a stranger can't keep a family login locked.
-1. [ ] **Close the live-update connection** when a device signs out, its password changes or its session ends (`server.js` ~438).
+1. [ ] **Admin "put the budget back to 3pm" tool** using the `changes` table (the backup before each deploy is done).
 1. [ ] **Warn the admin in the app** when the nightly backup is overdue or failed (today it's only on the admin page).
-1. [ ] **Weekly and monthly backups** only happen if the run lands on a Sunday or the 1st (`backup.js` ~95). Make one whenever the last is over 7 days (or a month) old.
 1. [ ] **Two-factor login on both GitHub accounts** (whatever merges goes live). Optionally pin the Docker and Actions versions (`tailscale:stable` floats).
 1. [ ] **Undo can wipe the other person's edit** made to the same transaction since. Skip the undo (or ask) when it has changed.
-1. [ ] **Small tidy-ups:** clear expired sessions; a mistyped web address gives a server error instead of "not found".
 
 ## Ideas
 
@@ -37,6 +33,9 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-17: **Backup before each deploy (Drew).** Auto-deploy now takes the app's usual encrypted backup (kept in its own `deploy` folder, last 10, copied to iCloud) before updating. If that fails it stays on the old version and tries again in 30 minutes. If the app is down, it updates anyway, since the update may be the fix.
+- 2026-10-17: **Weekly and monthly backups catch up (Drew).** A weekly copy is made whenever the newest is 7 or more days old, and a monthly one whenever this month has none yet, instead of only on Sundays and the 1st.
+- 2026-10-17: **Safer sign-ins (Drew).** Wrong passwords are counted per login *and* address, so a stranger only locks themselves out. Signing out, a password change or an expired session closes that device's live updates. Expired sessions are cleared every minute, and a garbled web address gets "not found" instead of a server error.
 - 2026-10-17: **Safety copy before big replaces (Drew).** Restore, Start fresh and Move from YNAB now go to the server in one go. The server saves a copy of the whole budget first, then swaps everything at once, so a dropped connection can't leave half a budget. If it fails, the budget is left as it was and you're told. Settings › Backup and moving gains a "Budget before the last restore" row: download it, then Restore from backup to go back. The last 10 copies are kept.
 - 2026-10-17: **Changes no longer vanish on a weak signal (Drew).** A change that can't reach YNABB now stays queued and keeps retrying (faster when the connection comes back) instead of being dropped after two tries. It's also kept in the browser, so closing the page, reloading or being signed out doesn't lose it: it's sent next time YNABB opens. Leaving the page still warns while anything is unsaved.
 - 2026-10-17: **Tests for the budget sums (Drew).** 16 tests cover carry-forward, overspending, Ready to Assign, splits, transfers, credit cards, group totals and targets. No bugs found. Note: `overspentBefore` counts one carried overspend again each month, but nothing shows it yet.
