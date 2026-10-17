@@ -691,10 +691,15 @@
     });
     // Lines with no dd/mm written in them (ATM, transfers in) can come back the same way with a new processing date.
     // The exact amount, the same words and within 2 days is that line. A different ATM time or reference makes different words.
+    // Plain words ("TRANSFER TO DREW") repeat for real, so the earlier line must fall inside this file's dates and be missing
+    // from it: a file starting after it can't have re-sent it. An ATM line names its day and time, so it is safe either way.
+    const fileDates = rows.map((r) => r.date).filter(Boolean).sort();
+    const inFile = (d) => fileDates.length && d >= fileDates[0] && d <= fileDates[fileDates.length - 1];
     out.forEach((r, i) => {
       if (r.status !== 'new' || isPending(r.desc) || dayMonth(r.desc)) return;
       const t = imported.find((x) => !used.has(x.id) && x.amt === r.amt && x.bank && !isPending(x.bank) && !dayMonth(x.bank)
         && !fileIks.has(x.ik) && !(x.iks || []).some((k) => fileIks.has(k)) && sameWords(r.desc, x.bank)
+        && (atmKey(r.desc) || inFile(x.date))
         && Math.abs((Date.parse(x.date) - Date.parse(r.date)) / 864e5) <= 2);
       if (t) { used.add(t.id); out[i] = Object.assign({}, r, { status: 'dupe', dupeOf: t.id }); }
     });

@@ -88,6 +88,18 @@ test('a transfer in comes back with its words moved about and cut short: skipped
   assert.equal(out[0].status, 'dupe');
 });
 
+test('a plain transfer on Monday and again on Tuesday: a file starting Tuesday keeps the second one', () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-12', amt: -1000, ik: 'a|2026-10-12|-1000|transfer to drew|1', bank: 'TRANSFER TO DREW PFITZNER' };
+  const out = E.classifyImport('a', [bank('2026-10-14', -500, 'COLES 0123 GRIFFITH'), bank('2026-10-13', -1000, 'TRANSFER TO DREW PFITZNER')], [earlier]);
+  assert.equal(out[1].status, 'new');
+});
+
+test('the same plain transfer re-sent with a new date in a file that covers its old date: skipped as already in', () => {
+  const earlier = { id: 'e', acct: 'a', date: '2026-10-12', amt: -1000, ik: 'a|2026-10-12|-1000|transfer to drew|1', bank: 'TRANSFER TO DREW PFITZNER' };
+  const out = E.classifyImport('a', [bank('2026-10-13', -1000, 'TRANSFER TO DREW PFITZNER'), bank('2026-10-11', -500, 'COLES 0123 GRIFFITH')], [earlier]);
+  assert.equal(out[0].status, 'dupe');
+});
+
 test('two ATM withdrawals at different times are two withdrawals', () => {
   const earlier = { id: 'e', acct: 'a', date: '2026-10-15', amt: -10000, ik: 'a|2026-10-15|-10000|x|1', bank: 'NABATM CSH 15th09:09GRIFFITH' };
   const out = E.classifyImport('a', [bank('2026-10-16', -10000, 'NABATM CSH 16th11:42GRIFFITH')], [earlier]);
