@@ -433,3 +433,58 @@ test('a mistyped address is "not found", not a server error', async () => {
   const r = await fetch(base + '/', { headers: { Cookie: 'ynabb=%E0%A4%A' }, redirect: 'manual' });
   assert.equal(r.status, 303);
 });
+
+test('a whole-budget replace keeps a safety copy and swaps everything at once', async () => {
+  const b = browser();
+  await b.login('drew', 'correct horse battery');
+  const nb = await b.call('POST', '/api/admin/budgets', { name: 'Replace test' });
+  await b.call('POST', '/api/admin/switch', { budget_id: nb.json.id });
+  await b.call('PATCH', '/api/doc/tx/2026-05', { t: { a: { id: 'a', amt: -500 } } });
+  const r = await b.call('PUT', '/api/budget', { why: 'restore', docs: { tx: { '2026-05': { t: {} }, '2026-06': { t: { z: { id: 'z', amt: 9 } } } } } });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.safety.why, 'restore');
+  const data = (await b.call('GET', '/api/data')).json;
+  assert.deepEqual(data.tx, { '2026-05': { t: {} }, '2026-06': { t: { z: { id: 'z', amt: 9 } } } });
+  const copy = (await b.call('GET', '/api/safety-copy')).json;
+  assert.equal(copy.app, 'zero-line');
+  assert.deepEqual(copy.data.tx['2026-05'], { t: { a: { id: 'a', amt: -500 } } });
+  // a bad document name refuses the lot, and nothing changes
+  const bad = await b.call('PUT', '/api/budget', { docs: { tx: { '2026-07': { t: {} }, '../x': {} } } });
+  assert.equal(bad.status, 400);
+  assert.equal((await b.call('GET', '/api/data')).json.tx['2026-07'], undefined);
+});
+
+test('the admin can put a budget back to an earlier time, with a safety copy', async () => {
+  const b = browser();
+  await b.login('drew', 'correct horse battery');
+  const nb = await b.call('POST', '/api/admin/budgets', { name: 'Rewind test' });
+  const id = nb.json.id;
+  await b.call('POST', '/api/admin/switch', { budget_id: id });
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+  await b.call('PATCH', '/api/doc/tx/2026-09', { t: { a: { id: 'a', amt: -500 }, b: { id: 'b', amt: -700 } } });
+  await b.call('PATCH', '/api/doc/meta/accounts', { items: { nab: { id: 'nab', name: 'NAB' } } });
+  await tick();
+  const then = Date.now();
+  await tick();
+  // after "3pm": one deleted, one edited, a new month
+  await b.call('PATCH', '/api/doc/tx/2026-09', { t: { a: { memo: 'oops' }, b: null } });
+  await b.call('PATCH', '/api/doc/tx/2026-10', { t: { c: { id: 'c', amt: -100 } } });
+  const look = await b.call('GET', `/api/admin/budgets/${id}/rewind?ts=${then}`);
+  assert.equal(look.status, 200);
+  assert.deepEqual(look.json.then, { transactions: 2, total: -1200, accounts: 1, categories: 0 });
+  assert.equal(look.json.now.transactions, 2);
+  assert.equal(look.json.since[0].changes, 2);
+  const go = await b.call('POST', `/api/admin/budgets/${id}/rewind`, { ts: then });
+  assert.equal(go.status, 200);
+  const data = (await b.call('GET', '/api/data')).json;
+  assert.deepEqual(data.tx['2026-09'], { t: { a: { id: 'a', amt: -500 }, b: { id: 'b', amt: -700 } } });
+  assert.deepEqual(data.tx['2026-10'], { t: {} });
+  assert.deepEqual((await b.call('GET', '/api/safety-copy')).json.data.tx['2026-10'], { t: { c: { id: 'c', amt: -100 } } });
+  // the put-back is itself in the history, so it can be undone the same way
+  assert.equal((await b.call('GET', `/api/admin/budgets/${id}/rewind?ts=${Date.now()}`)).status, 200);
+  // a record the history can't explain makes it refuse rather than guess
+  db.prepare('INSERT INTO docs VALUES (?, ?, ?, ?, ?)').run(id, 'tx', '2020-01', '{"t":{}}', Date.now());
+  const refused = await b.call('POST', `/api/admin/budgets/${id}/rewind`, { ts: then });
+  assert.equal(refused.status, 409);
+  assert.equal((await b.call('GET', `/api/admin/budgets/${id}/rewind?ts=${Date.now() + 60e3}`)).status, 400);
+});

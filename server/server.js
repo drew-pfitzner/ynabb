@@ -370,25 +370,64 @@ function replaceBudget(who, body) {
     if (!isObj(docs[coll])) fail(400, 'Unknown document.');
     for (const id in docs[coll]) { checkDocPath(coll, id); if (!isObj(docs[coll][id])) fail(400, 'Send an object.', 'invalid_argument'); }
   }
-  const why = String(body.why || 'replace').slice(0, 40);
+  return replaceDocs(who.budgetId, who.user.id, docs, String(body.why || 'replace').slice(0, 40));
+}
+function replaceDocs(budgetId, userId, docs, why) {
   const ts = tx(() => {
     const now = Date.now();
-    const old = loadAll(who.budgetId);
-    q('INSERT INTO safety_copies (budget_id, why, body, user_id, ts) VALUES (?, ?, ?, ?, ?)').run(who.budgetId, why, JSON.stringify(old), who.user.id, now);
-    q('DELETE FROM safety_copies WHERE budget_id = ? AND seq NOT IN (SELECT seq FROM safety_copies WHERE budget_id = ? ORDER BY seq DESC LIMIT ?)').run(who.budgetId, who.budgetId, SAFETY_KEEP);
+    const old = loadAll(budgetId);
+    q('INSERT INTO safety_copies (budget_id, why, body, user_id, ts) VALUES (?, ?, ?, ?, ?)').run(budgetId, why, JSON.stringify(old), userId, now);
+    q('DELETE FROM safety_copies WHERE budget_id = ? AND seq NOT IN (SELECT seq FROM safety_copies WHERE budget_id = ? ORDER BY seq DESC LIMIT ?)').run(budgetId, budgetId, SAFETY_KEEP);
     for (const coll in docs) for (const id in docs[coll]) {
-      const row = q('SELECT body FROM docs WHERE budget_id = ? AND coll = ? AND id = ?').get(who.budgetId, coll, id);
+      const row = q('SELECT body FROM docs WHERE budget_id = ? AND coll = ? AND id = ?').get(budgetId, coll, id);
       const next = JSON.stringify(stripNulls(docs[coll][id]));
       q('INSERT INTO docs VALUES (?, ?, ?, ?, ?) ON CONFLICT (budget_id, coll, id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at')
-        .run(who.budgetId, coll, id, next, now);
+        .run(budgetId, coll, id, next, now);
       q('INSERT INTO changes (budget_id, coll, id, op, body, before, user_id, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(who.budgetId, coll, id, 'put', next, row ? row.body : null, who.user.id, now);
+        .run(budgetId, coll, id, 'put', next, row ? row.body : null, userId, now);
     }
     return now;
   });
-  const set = streams.get(who.budgetId);
-  if (set) { const line = 'event: snapshot\ndata: ' + JSON.stringify(loadAll(who.budgetId)) + '\n\n'; for (const r of set) r.write(line); }
+  const set = streams.get(budgetId);
+  if (set) { const line = 'event: snapshot\ndata: ' + JSON.stringify(loadAll(budgetId)) + '\n\n'; for (const r of set) r.write(line); }
   return { ok: true, safety: { ts, why } };
+}
+
+// ---------- put the budget back to an earlier time ----------
+// Every write is in `changes`, so replaying them in order up to a moment rebuilds the budget as it was then.
+// The replay is only trusted when replaying everything gives exactly today's budget: proof the history is complete.
+const canon = (v) => JSON.stringify(v, (k, x) => (isObj(x) ? Object.keys(x).sort().reduce((o, key) => ((o[key] = x[key]), o), {}) : x));
+function replayTo(budgetId, until) {
+  const out = { meta: {}, months: {}, tx: {} };
+  for (const c of q('SELECT coll, id, op, body FROM changes WHERE budget_id = ? AND ts <= ? ORDER BY seq').all(budgetId, until)) {
+    if (!out[c.coll]) continue;
+    const body = JSON.parse(c.body);
+    out[c.coll][c.id] = c.op === 'patch' ? stripNulls(deepMerge(out[c.coll][c.id], body)) : stripNulls(body);
+  }
+  return out;
+}
+const EMPTY_DOC = (coll, id) => (coll === 'tx' ? { t: {} } : coll === 'months' ? { assigned: {}, moves: {} } : id === 'settings' ? {} : { items: {} });
+function budgetAt(budgetId, ts) {
+  const now = loadAll(budgetId), full = replayTo(budgetId, Date.now() + 1);
+  let gaps = 0;
+  for (const coll of COLLS) for (const id of new Set(Object.keys(now[coll]).concat(Object.keys(full[coll])))) if (canon(now[coll][id]) !== canon(full[coll][id])) gaps++;
+  if (gaps) fail(409, `The change history doesn't fully explain the budget as it is now (${gaps} records differ), so it can't be put back safely. Use a backup instead.`);
+  const then = replayTo(budgetId, ts);
+  // records made since then are emptied rather than deleted, the same as a restore
+  for (const coll of COLLS) for (const id in now[coll]) if (!then[coll][id]) then[coll][id] = EMPTY_DOC(coll, id);
+  return { now, then };
+}
+// a few plain numbers to compare: what the admin checks before putting it back
+function budgetSummary(d) {
+  const tx = [];
+  for (const m in d.tx) for (const t of Object.values((d.tx[m] || {}).t || {})) if (t) tx.push(t);
+  const live = (doc) => Object.values((doc && doc.items) || {}).filter((x) => x && !x.deleted);
+  return { transactions: tx.length, total: tx.reduce((n, t) => n + (t.amt || 0), 0), accounts: live(d.meta.accounts).length, categories: live(d.meta.cats).length };
+}
+function rewindPreview(budgetId, ts) {
+  const { now, then } = budgetAt(budgetId, ts);
+  const since = q('SELECT c.user_id, u.name, COUNT(*) n, MIN(c.ts) first, MAX(c.ts) last FROM changes c LEFT JOIN users u ON u.id = c.user_id WHERE c.budget_id = ? AND c.ts > ? GROUP BY c.user_id').all(budgetId, ts);
+  return { ts, then: budgetSummary(then), now: budgetSummary(now), since: since.map((r) => ({ name: r.name || 'someone', changes: r.n, first: r.first, last: r.last })) };
 }
 const lastSafety = (budgetId) => q('SELECT seq, ts, why FROM safety_copies WHERE budget_id = ? ORDER BY seq DESC LIMIT 1').get(budgetId) || null;
 // the newest safety copy as an ordinary backup file, so Restore from backup can put it back
@@ -485,6 +524,14 @@ async function adminAction(req, res, who, parts) {
     const name = String(body.name || '').trim().slice(0, 60) || fail(400, 'Give the budget a name.');
     q('UPDATE budgets SET name = ? WHERE id = ?').run(name, id);
     return send(res, 200, { ok: true });
+  }
+  // put a budget back to how it was at a time: GET shows what would change, POST does it (keeping a safety copy first)
+  if (what === 'budgets' && id && extra === 'rewind') {
+    budgetOk(id);
+    const ts = Number(req.method === 'GET' ? new URL(req.url, 'http://x').searchParams.get('ts') : body.ts);
+    if (!Number.isFinite(ts) || ts <= 0 || ts > Date.now()) fail(400, 'Choose a time in the past.');
+    if (req.method === 'GET') return send(res, 200, rewindPreview(id, ts));
+    if (req.method === 'POST') return send(res, 200, replaceDocs(id, who.user.id, budgetAt(id, ts).then, 'put back'));
   }
   if (what === 'backup-now' && req.method === 'POST') {
     try { await backups.run(body.kind === 'drill' ? 'drill' : 'backup'); } catch (e) { fail(400, e.message); }

@@ -17,7 +17,6 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ### From the 17 Oct check-over (Drew), most important first
 
-1. [ ] **Admin "put the budget back to 3pm" tool** using the `changes` table (the backup before each deploy is done).
 1. [ ] **Warn the admin in the app** when the nightly backup is overdue or failed (today it's only on the admin page).
 1. [ ] **Two-factor login on both GitHub accounts** (whatever merges goes live). Optionally pin the Docker and Actions versions (`tailscale:stable` floats).
 1. [ ] **Undo can wipe the other person's edit** made to the same transaction since. Skip the undo (or ask) when it has changed.
@@ -33,6 +32,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-17: **Put a budget back to an earlier time (Drew).** On the Account page (admin), pick a budget and a time, press **See what changes** to compare then and now (transactions, total, accounts, categories, and who changed what since), then put it back. YNABB rebuilds the budget from its log of every change, and refuses if that log can't fully explain the budget as it is now. A copy of the current budget is kept first (Settings › Budget before the last put back).
 - 2026-10-17: **Backup before each deploy (Drew).** Auto-deploy now takes the app's usual encrypted backup (kept in its own `deploy` folder, last 10, copied to iCloud) before updating. If that fails it stays on the old version and tries again in 30 minutes. If the app is down, it updates anyway, since the update may be the fix.
 - 2026-10-17: **Weekly and monthly backups catch up (Drew).** A weekly copy is made whenever the newest is 7 or more days old, and a monthly one whenever this month has none yet, instead of only on Sundays and the 1st.
 - 2026-10-17: **Safer sign-ins (Drew).** Wrong passwords are counted per login *and* address, so a stranger only locks themselves out. Signing out, a password change or an expired session closes that device's live updates. Expired sessions are cleared every minute, and a garbled web address gets "not found" instead of a server error.
