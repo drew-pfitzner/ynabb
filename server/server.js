@@ -23,8 +23,10 @@ const STARTED = Date.now();
 
 const MIN = 60e3, DAY = 24 * 60 * MIN;
 const SESSION_IDLE = 14 * DAY, SESSION_MAX = 90 * DAY;
-const USER_FAILS = 5, USER_LOCK = 15 * MIN; // wrong passwords before a login locks, and for how long
-const IP_FAILS = 10, IP_WINDOW = 15 * MIN; // wrong passwords from one address before it has to wait
+// wrong passwords are counted per login *and* address, so a stranger can't lock the family out of their own devices
+const USER_FAILS = 5, USER_LOCK = 15 * MIN; // wrong passwords for one login from one address before that pair locks, and for how long
+const IP_FAILS = 10, IP_WINDOW = 15 * MIN; // wrong passwords from one address (any login) before it has to wait
+const SWEEP_EVERY = MIN; // how often expired sessions and old wrong-password counts are cleared
 const COLLS = ['meta', 'months', 'tx'];
 const DOC_ID = /^[A-Za-z0-9_.:-]{1,100}$/;
 const BLOB_ID = /^[A-Za-z0-9_-]{1,100}$/;
@@ -205,7 +207,9 @@ function parseCookies(req) {
   const out = {};
   for (const part of String(req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i <= 0) continue;
+    // a garbled cookie just means "not signed in", not a server error
+    try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch (e) { /* skip it */ }
   }
   return out;
 }
@@ -232,18 +236,47 @@ function whoIs(req) {
   const budgetId = user.admin ? (s.budget_id || user.budget_id) : user.budget_id;
   return { session: s, user, budgetId };
 }
-function endSessionsFor(userId) {
-  q('DELETE FROM sessions WHERE user_id = ?').run(userId);
-  for (const set of streams.values()) for (const res of set) if (res.userId === userId) res.end();
+// close live-update connections that match, so a signed-out device stops getting budget changes
+function closeStreams(match) {
+  for (const set of streams.values()) for (const res of set) if (match(res)) { set.delete(res); res.end(); }
+}
+// sign a person out everywhere, or everywhere but one session (theirs, after changing their own password)
+function endSessionsFor(userId, keepSessionId) {
+  q('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(userId, keepSessionId || '');
+  closeStreams((res) => res.userId === userId && res.sessionId !== keepSessionId);
+}
+// clear expired sessions, and close any live connection whose session has gone (expired, or ended by the command line)
+function sweep() {
+  const now = Date.now();
+  q('DELETE FROM sessions WHERE seen_at < ? OR created_at < ?').run(now - SESSION_IDLE, now - SESSION_MAX);
+  const alive = q('SELECT 1 FROM sessions WHERE id = ?');
+  closeStreams((res) => !alive.get(res.sessionId));
+  for (const [ip, list] of ipFails) if (!list.some((t) => now - t < IP_WINDOW)) ipFails.delete(ip);
+  for (const [key, f] of loginFails) if (f.until <= now && now - f.last > USER_LOCK) loginFails.delete(key);
 }
 
 // ---------- logins ----------
+// kept in memory: a restart forgets them, which is fine for a family app
 const ipFails = new Map(); // ip -> times of recent wrong passwords
+const loginFails = new Map(); // 'username ip' -> { n: wrong passwords in a row, last: time of the last one, until: locked until }
+const failKey = (username, ip) => username.toLowerCase() + ' ' + ip;
 function ipBlocked(ip) {
   const now = Date.now();
   const list = (ipFails.get(ip) || []).filter((t) => now - t < IP_WINDOW);
   ipFails.set(ip, list);
   return list.length >= IP_FAILS;
+}
+// the admin unlocking a login, or giving it a new password, clears it on every address
+function unlockLogin(username) {
+  const prefix = username.toLowerCase() + ' ';
+  for (const key of loginFails.keys()) if (key.startsWith(prefix)) loginFails.delete(key);
+}
+// for the admin page: the latest time any address is locked out of this login
+function lockedUntil(username) {
+  const prefix = username.toLowerCase() + ' ', now = Date.now();
+  let until = 0;
+  for (const [key, f] of loginFails) if (key.startsWith(prefix) && f.until > now) until = Math.max(until, f.until);
+  return until;
 }
 function noteSignin(req, username, userId, ok, note) {
   q('INSERT INTO signins (ts, username, user_id, ip, agent, ok, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -256,23 +289,31 @@ async function login(req, res) {
   const NOPE = "That username and password don't match.";
   if (ipBlocked(ip)) { noteSignin(req, username, null, false, 'address waiting'); fail(429, 'Too many wrong passwords. Wait 15 minutes and try again.'); }
   const user = username ? q('SELECT * FROM users WHERE username = ?').get(username) : null;
-  const wrong = (note) => { ipFails.get(ip).push(Date.now()); noteSignin(req, username, user && user.id, false, note); fail(401, NOPE); };
+  const key = failKey(username, ip);
+  const prev = loginFails.get(key);
+  // only this login from this address is locked: the real person on their own device can still sign in
+  if (prev && prev.until > Date.now()) { noteSignin(req, username, user && user.id, false, 'locked'); fail(429, 'This login is locked for a few minutes after too many wrong passwords.'); }
+  const wrong = (note) => {
+    const now = Date.now();
+    ipFails.get(ip).push(now);
+    // count wrong passwords in a row; a gap longer than the lock starts the count again
+    const n = (prev && now - prev.last < USER_LOCK ? prev.n : 0) + 1;
+    loginFails.set(key, n >= USER_FAILS ? { n: 0, last: now, until: now + USER_LOCK } : { n, last: now, until: 0 });
+    noteSignin(req, username, user && user.id, false, note);
+    fail(401, NOPE);
+  };
   if (!user) { await checkPassword(pw, await DUMMY_HASH); wrong('no such user'); }
-  if (user.locked_until > Date.now()) { noteSignin(req, username, user.id, false, 'locked'); fail(429, 'This login is locked for a few minutes after too many wrong passwords.'); }
-  const good = await checkPassword(pw, user.pass);
-  if (!good) {
-    const fails = user.fails + 1;
-    if (fails >= USER_FAILS) q('UPDATE users SET fails = 0, locked_until = ? WHERE id = ?').run(Date.now() + USER_LOCK, user.id);
-    else q('UPDATE users SET fails = ? WHERE id = ?').run(fails, user.id);
-    wrong('wrong password');
-  }
+  if (!(await checkPassword(pw, user.pass))) wrong('wrong password');
   if (user.disabled) wrong('login turned off');
-  q('UPDATE users SET fails = 0, locked_until = 0 WHERE id = ?').run(user.id);
+  loginFails.delete(key);
   noteSignin(req, username, user.id, true);
   send(res, 200, { ok: true }, { 'Set-Cookie': startSession(req, user) });
 }
 function logout(req, res, who) {
-  if (who) q('DELETE FROM sessions WHERE id = ?').run(who.session.id);
+  if (who) {
+    q('DELETE FROM sessions WHERE id = ?').run(who.session.id);
+    closeStreams((r) => r.sessionId === who.session.id);
+  }
   send(res, 200, { ok: true }, { 'Set-Cookie': cookieHeader('', 0) });
 }
 async function changePassword(req, res, who) {
@@ -282,7 +323,7 @@ async function changePassword(req, res, who) {
   if (bad) fail(400, bad);
   q('UPDATE users SET pass = ? WHERE id = ?').run(await hashPassword(body.next), who.user.id);
   // sign out everywhere else, keep this device signed in
-  q('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(who.user.id, who.session.id);
+  endSessionsFor(who.user.id, who.session.id);
   send(res, 200, { ok: true });
 }
 
@@ -361,6 +402,7 @@ function openStream(req, res, who) {
     'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no',
   }));
   res.userId = who.user.id;
+  res.sessionId = who.session.id;
   res.write('retry: 3000\nevent: snapshot\ndata: ' + JSON.stringify(loadAll(who.budgetId)) + '\n\n');
   if (!streams.has(who.budgetId)) streams.set(who.budgetId, new Set());
   streams.get(who.budgetId).add(res);
@@ -416,8 +458,9 @@ function deployStatus() {
 function adminOverview(res) {
   send(res, 200, {
     budgets: q('SELECT b.id, b.name, b.created_at, (SELECT COUNT(*) FROM docs d WHERE d.budget_id = b.id) docs, (SELECT MAX(ts) FROM changes c WHERE c.budget_id = b.id) last_change FROM budgets b ORDER BY b.created_at').all(),
-    users: q(`SELECT u.id, u.username, u.name, u.admin, u.budget_id, u.disabled, u.locked_until, u.created_at,
-      (SELECT MAX(ts) FROM signins s WHERE s.user_id = u.id AND s.ok = 1) last_signin FROM users u ORDER BY u.created_at`).all(),
+    users: q(`SELECT u.id, u.username, u.name, u.admin, u.budget_id, u.disabled, u.created_at,
+      (SELECT MAX(ts) FROM signins s WHERE s.user_id = u.id AND s.ok = 1) last_signin FROM users u ORDER BY u.created_at`).all()
+      .map((u) => Object.assign(u, { locked_until: lockedUntil(u.username) })),
     signins: q('SELECT ts, username, ip, agent, ok, note FROM signins ORDER BY seq DESC LIMIT 60').all(),
     backups: backups.status(),
     deploy: deployStatus(),
@@ -466,8 +509,10 @@ async function adminAction(req, res, who, parts) {
   const user = id && q('SELECT * FROM users WHERE id = ?').get(id);
   if (what === 'users' && user && extra === 'reset' && req.method === 'POST') {
     const pw = newPassword();
-    q('UPDATE users SET pass = ?, fails = 0, locked_until = 0 WHERE id = ?').run(await hashPassword(pw), id);
-    if (id !== who.user.id) endSessionsFor(id);
+    q('UPDATE users SET pass = ? WHERE id = ?').run(await hashPassword(pw), id);
+    unlockLogin(user.username);
+    // the admin resetting their own password keeps this device signed in, like changing it themselves
+    endSessionsFor(id, id === who.user.id ? who.session.id : undefined);
     return send(res, 200, { password: pw });
   }
   if (what === 'users' && user && !extra && req.method === 'PATCH') {
@@ -479,10 +524,10 @@ async function adminAction(req, res, who, parts) {
       budget_id: 'budget_id' in body ? body.budget_id : user.budget_id,
       admin: 'admin' in body ? (body.admin ? 1 : 0) : user.admin,
       disabled: 'disabled' in body ? (body.disabled ? 1 : 0) : user.disabled,
-      locked_until: body.unlock ? 0 : user.locked_until,
     };
-    q('UPDATE users SET name = ?, budget_id = ?, admin = ?, disabled = ?, locked_until = ? WHERE id = ?')
-      .run(next.name, next.budget_id, next.admin, next.disabled, next.locked_until, id);
+    if (body.unlock) unlockLogin(user.username);
+    q('UPDATE users SET name = ?, budget_id = ?, admin = ?, disabled = ?, locked_until = 0 WHERE id = ?')
+      .run(next.name, next.budget_id, next.admin, next.disabled, id);
     if (next.disabled || next.budget_id !== user.budget_id || next.admin !== user.admin) endSessionsFor(id);
     return send(res, 200, { ok: true });
   }
@@ -522,7 +567,9 @@ function checkSameSite(req) {
 
 async function route(req, res) {
   const url = new URL(req.url, 'http://x');
-  const p = decodeURIComponent(url.pathname);
+  let p;
+  // a garbled web address (like a stray %) is simply not found, not a server error
+  try { p = decodeURIComponent(url.pathname); } catch (e) { fail(404, 'Not found.'); }
   const m = req.method;
   if (p === '/api/health') return send(res, 200, { ok: true, version: VERSION });
   if (m !== 'GET' && m !== 'HEAD') checkSameSite(req);
@@ -565,6 +612,8 @@ const server = http.createServer((req, res) => {
     if (!(e instanceof HttpError)) console.error(new Date().toISOString(), req.method, req.url, e);
     if (res.headersSent) return res.end();
     const status = e instanceof HttpError ? e.status : 500;
+    // a mistyped page address gets a plain "not found" page; the API keeps answering in JSON
+    if (status === 404 && !/^\/(api|_blob)\//.test(req.url)) return send(res, 404, 'Not found. Check the address, or go back to YNABB at /');
     send(res, status, { error: status === 500 ? 'Something went wrong on the server.' : e.message, code: e.code || null });
   });
 });
@@ -587,6 +636,7 @@ async function cli(args) {
     const r = q('UPDATE users SET pass = ?, fails = 0, locked_until = 0, disabled = 0 WHERE username = ?').run(await hashPassword(pw), username);
     if (!r.changes) { console.error('No such user.'); process.exit(1); }
     q('DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)').run(username);
+    // wrong-password locks live in the running server's memory; restarting it clears them
     console.log(`New password for "${username}": ${pw}`);
   } else {
     console.error('Usage: server.js [add-admin <username> <name> | reset-password <username>]');
@@ -600,6 +650,8 @@ if (require.main === module) {
   else bootstrap().then(() => server.listen(PORT, HOST, () => {
     console.log(`YNABB ${VERSION} on http://${HOST}:${PORT} (data in ${DATA_DIR})`);
     backups.start();
+    sweep(); // clear sessions that expired while the server was off
+    setInterval(sweep, SWEEP_EVERY).unref();
   }));
 }
-module.exports = { server, bootstrap, db, ipFails, backups };
+module.exports = { server, bootstrap, db, ipFails, loginFails, sweep, backups };

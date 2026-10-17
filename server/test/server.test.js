@@ -8,8 +8,9 @@ const path = require('node:path');
 const http = require('node:http');
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ynabb-test-'));
-Object.assign(process.env, { DATA_DIR: dir, COOKIE_SECURE: '0', ADMIN_USERNAME: 'drew', ADMIN_PASSWORD: 'correct horse battery', ADMIN_NAME: 'Drew' });
-const { server, bootstrap, db, ipFails } = require('../server.js');
+// TRUST_PROXY lets a test pretend to be another address with X-Forwarded-For
+Object.assign(process.env, { DATA_DIR: dir, COOKIE_SECURE: '0', TRUST_PROXY: '1', ADMIN_USERNAME: 'drew', ADMIN_PASSWORD: 'correct horse battery', ADMIN_NAME: 'Drew' });
+const { server, bootstrap, db, ipFails, loginFails, sweep } = require('../server.js');
 let base;
 
 before(async () => {
@@ -18,7 +19,7 @@ before(async () => {
   base = 'http://127.0.0.1:' + server.address().port;
 });
 after(() => { server.close(); server.closeAllConnections(); fs.rmSync(dir, { recursive: true, force: true }); });
-beforeEach(() => ipFails.clear());
+beforeEach(() => { ipFails.clear(); loginFails.clear(); });
 
 // a tiny browser: keeps its cookie and sends the header our pages send
 function browser() {
@@ -57,6 +58,24 @@ function listen(cookie, until) {
     setTimeout(() => { req.destroy(); no(new Error('timed out waiting for events')); }, 3000);
   });
 }
+
+// open a live-update connection; resolves once the snapshot arrives, with a promise for when the server closes it
+function openStream(cookie) {
+  return new Promise((ok, no) => {
+    const req = http.get(base + '/api/events', { headers: { Cookie: cookie } }, (res) => {
+      let closed = false;
+      const ended = new Promise((done) => res.on('end', () => { closed = true; done(); }));
+      let buf = '';
+      res.on('data', (c) => {
+        buf += c;
+        if (buf.includes('event: snapshot')) ok({ ended, get closed() { return closed; }, stop: () => req.destroy() });
+      });
+    });
+    req.on('error', (e) => { if (e.code !== 'ECONNRESET') no(e); });
+  });
+}
+const within = (p, ms = 2000) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('still open')), ms))]);
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test('health check works without signing in', async () => {
   const r = await browser().call('GET', '/api/health');
@@ -324,4 +343,93 @@ test('signing out ends the session', async () => {
 test('passwords are stored as scrypt hashes, never as typed', () => {
   for (const u of db.prepare('SELECT pass FROM users').all()) assert.match(u.pass, /^scrypt\$/);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM users WHERE pass LIKE '%correct horse%'").get().n, 0);
+});
+
+test('a stranger hammering a login only locks it on their own address', async () => {
+  const stranger = { 'X-Forwarded-For': '203.0.113.9' };
+  const s = browser();
+  for (let i = 0; i < 5; i++) assert.equal((await s.call('POST', '/api/login', { username: 'Drew', password: 'wrong wrong wrong' }, stranger)).status, 401);
+  // even the right password is refused from the stranger's address...
+  const r = await s.call('POST', '/api/login', { username: 'drew', password: 'correct horse battery' }, stranger);
+  assert.equal(r.status, 429);
+  assert.match(r.json.error, /locked/);
+  // ...but Drew on his own device still gets in, and the admin page shows the login as locked
+  const d = browser();
+  assert.equal((await d.login('drew', 'correct horse battery')).status, 200);
+  const me = (await d.call('GET', '/api/admin/overview')).json.users.find((x) => x.username === 'drew');
+  assert.ok(me.locked_until > Date.now());
+  // and Drew's own wrong passwords are counted separately from the stranger's
+  for (let i = 0; i < 4; i++) await browser().login('drew', 'wrong wrong wrong');
+  assert.equal((await browser().login('drew', 'correct horse battery')).status, 200);
+});
+
+test("signing out closes that device's live updates, not the other devices", async () => {
+  const a = browser(), b = browser();
+  await a.login('drew', 'correct horse battery');
+  await b.login('drew', 'correct horse battery');
+  const sa = await openStream(a.cookie), sb = await openStream(b.cookie);
+  await a.call('POST', '/api/logout');
+  await within(sa.ended);
+  await pause(100);
+  assert.equal(sb.closed, false);
+  sb.stop();
+});
+
+test('a new password closes the live updates of the devices it signs out', async () => {
+  const d = browser();
+  await d.login('drew', 'correct horse battery');
+  const fam = (await d.call('GET', '/api/me')).json.budget.id;
+  let pw = (await d.call('POST', '/api/admin/users', { name: 'Kid', username: 'kid', budget_id: fam })).json.password;
+  const phone = browser(), laptop = browser();
+  await phone.login('kid', pw);
+  await laptop.login('kid', pw);
+  const sp = await openStream(phone.cookie), sl = await openStream(laptop.cookie);
+  // changing it yourself closes the other device, keeps this one
+  assert.equal((await laptop.call('POST', '/api/password', { current: pw, next: 'a brand new password' })).status, 200);
+  await within(sp.ended);
+  await pause(100);
+  assert.equal(sl.closed, false);
+  // the admin giving a new password closes every device
+  const u = (await d.call('GET', '/api/admin/overview')).json.users.find((x) => x.username === 'kid');
+  pw = (await d.call('POST', `/api/admin/users/${u.id}/reset`)).json.password;
+  await within(sl.ended);
+  assert.equal((await laptop.call('GET', '/api/me')).status, 401);
+});
+
+test('expired sessions are cleared from storage and their live updates closed', async () => {
+  const b = browser();
+  await b.login('drew', 'correct horse battery');
+  const st = await openStream(b.cookie);
+  const keep = browser();
+  await keep.login('drew', 'correct horse battery');
+  const DAY = 864e5;
+  const n = () => db.prepare('SELECT COUNT(*) n FROM sessions').get().n;
+  // make the first session look 15 days unused, and add one past the 90-day limit
+  const id = require('node:crypto').createHash('sha256').update(b.cookie.split('=')[1]).digest('base64url');
+  db.prepare('UPDATE sessions SET seen_at = ? WHERE id = ?').run(Date.now() - 15 * DAY, id);
+  const u = db.prepare("SELECT id FROM users WHERE username = 'drew'").get().id;
+  db.prepare('INSERT INTO sessions VALUES (?, ?, NULL, ?, ?, NULL, NULL)').run('old-one', u, Date.now() - 91 * DAY, Date.now());
+  const before = n();
+  sweep();
+  assert.equal(n(), before - 2);
+  assert.equal(db.prepare("SELECT 1 FROM sessions WHERE id IN (?, 'old-one')").get(id), undefined);
+  await within(st.ended);
+  assert.equal((await b.call('GET', '/api/me')).status, 401);
+  assert.equal((await keep.call('GET', '/api/me')).status, 200);
+});
+
+test('a mistyped address is "not found", not a server error', async () => {
+  const b = browser();
+  await b.login('drew', 'correct horse battery');
+  for (const p of ['/%', '/%E0%A4%A', '/no-such-page', '/nope/%zz']) {
+    const r = await b.call('GET', p);
+    assert.equal(r.status, 404, p);
+    assert.match(r.text, /Not found/, p);
+  }
+  const api = await b.call('GET', '/api/%');
+  assert.equal(api.status, 404);
+  assert.equal(api.json.error, 'Not found.');
+  // a garbled cookie just means signed out
+  const r = await fetch(base + '/', { headers: { Cookie: 'ynabb=%E0%A4%A' }, redirect: 'manual' });
+  assert.equal(r.status, 303);
 });
