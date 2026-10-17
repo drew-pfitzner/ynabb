@@ -17,7 +17,6 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ### From the 17 Oct check-over (Drew), most important first
 
-1. [ ] **Safety copy before big replaces.** Restore, Start fresh (guide) and Move from YNAB don't take a backup first, and restore has no error handling: it replaces documents one by one, so a dropped connection leaves half a budget (`app.js` ~3810). Have the server snapshot first and restore in one go.
 1. [ ] **Backup before each deploy** in `deploy/auto-deploy.ps1`. Later: an admin "put the budget back to 3pm" tool using the `changes` table.
 1. [ ] **Login lock-outs:** count wrong passwords per username *and* address, so a stranger can't keep a family login locked.
 1. [ ] **Close the live-update connection** when a device signs out, its password changes or its session ends (`server.js` ~438).
@@ -38,6 +37,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-17: **Safety copy before big replaces (Drew).** Restore, Start fresh and Move from YNAB now go to the server in one go. The server saves a copy of the whole budget first, then swaps everything at once, so a dropped connection can't leave half a budget. If it fails, the budget is left as it was and you're told. Settings › Backup and moving gains a "Budget before the last restore" row: download it, then Restore from backup to go back. The last 10 copies are kept.
 - 2026-10-17: **Changes no longer vanish on a weak signal (Drew).** A change that can't reach YNABB now stays queued and keeps retrying (faster when the connection comes back) instead of being dropped after two tries. It's also kept in the browser, so closing the page, reloading or being signed out doesn't lose it: it's sent next time YNABB opens. Leaving the page still warns while anything is unsaved.
 - 2026-10-17: **Tests for the budget sums (Drew).** 16 tests cover carry-forward, overspending, Ready to Assign, splits, transfers, credit cards, group totals and targets. No bugs found. Note: `overspentBefore` counts one carried overspend again each month, but nothing shows it yet.
 - 2026-10-17: **Import no longer skips a real repeat transfer (Drew).** A line with no dd/mm in it (e.g. a $10 transfer on Monday and again on Tuesday) was skipped as "already in" when the new file started after the first one. Now it's only called a re-send when the earlier line's date falls inside the new file's dates but is missing from it. ATM lines name their day and time, so they're still caught either way. The dd/mm rule is left as is: the written date and shop make a real repeat very unlikely.

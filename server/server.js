@@ -62,6 +62,9 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, budget_id TEXT NOT NULL, coll TEXT NOT NULL, id TEXT NOT NULL,
     op TEXT NOT NULL, body TEXT NOT NULL, before TEXT, user_id TEXT, ts INTEGER NOT NULL);
+  -- the whole budget as it was just before a restore, start fresh or move from YNAB replaced it
+  CREATE TABLE IF NOT EXISTS safety_copies (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, budget_id TEXT NOT NULL, why TEXT, body TEXT NOT NULL, user_id TEXT, ts INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS blobs (
     id TEXT PRIMARY KEY, budget_id TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, user_id TEXT, ts INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS signins (
@@ -316,6 +319,43 @@ function writeDoc(who, coll, id, body, op) {
   });
   broadcast(who.budgetId, { coll, id, doc });
 }
+// Swap the whole budget at once: a safety copy of what's there first, then every document in one transaction,
+// so a dropped connection can't leave half a budget. Open pages get the new budget as a fresh snapshot.
+const SAFETY_KEEP = 10;
+function replaceBudget(who, body) {
+  const docs = body && body.docs;
+  if (!isObj(docs)) fail(400, 'Send the whole budget.', 'invalid_argument');
+  for (const coll in docs) {
+    if (!isObj(docs[coll])) fail(400, 'Unknown document.');
+    for (const id in docs[coll]) { checkDocPath(coll, id); if (!isObj(docs[coll][id])) fail(400, 'Send an object.', 'invalid_argument'); }
+  }
+  const why = String(body.why || 'replace').slice(0, 40);
+  const ts = tx(() => {
+    const now = Date.now();
+    const old = loadAll(who.budgetId);
+    q('INSERT INTO safety_copies (budget_id, why, body, user_id, ts) VALUES (?, ?, ?, ?, ?)').run(who.budgetId, why, JSON.stringify(old), who.user.id, now);
+    q('DELETE FROM safety_copies WHERE budget_id = ? AND seq NOT IN (SELECT seq FROM safety_copies WHERE budget_id = ? ORDER BY seq DESC LIMIT ?)').run(who.budgetId, who.budgetId, SAFETY_KEEP);
+    for (const coll in docs) for (const id in docs[coll]) {
+      const row = q('SELECT body FROM docs WHERE budget_id = ? AND coll = ? AND id = ?').get(who.budgetId, coll, id);
+      const next = JSON.stringify(stripNulls(docs[coll][id]));
+      q('INSERT INTO docs VALUES (?, ?, ?, ?, ?) ON CONFLICT (budget_id, coll, id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at')
+        .run(who.budgetId, coll, id, next, now);
+      q('INSERT INTO changes (budget_id, coll, id, op, body, before, user_id, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(who.budgetId, coll, id, 'put', next, row ? row.body : null, who.user.id, now);
+    }
+    return now;
+  });
+  const set = streams.get(who.budgetId);
+  if (set) { const line = 'event: snapshot\ndata: ' + JSON.stringify(loadAll(who.budgetId)) + '\n\n'; for (const r of set) r.write(line); }
+  return { ok: true, safety: { ts, why } };
+}
+const lastSafety = (budgetId) => q('SELECT seq, ts, why FROM safety_copies WHERE budget_id = ? ORDER BY seq DESC LIMIT 1').get(budgetId) || null;
+// the newest safety copy as an ordinary backup file, so Restore from backup can put it back
+function safetyFile(res, who) {
+  const row = q('SELECT * FROM safety_copies WHERE budget_id = ? ORDER BY seq DESC LIMIT 1').get(who.budgetId);
+  if (!row) fail(404, 'There is no safety copy yet.');
+  send(res, 200, { app: 'zero-line', version: 1, exportedAt: new Date(row.ts).toISOString(), safetyCopy: row.why, data: JSON.parse(row.body) });
+}
 function openStream(req, res, who) {
   res.writeHead(200, Object.assign({}, SECURITY_HEADERS, {
     'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no',
@@ -336,7 +376,8 @@ function people(budgetId) {
 }
 function meInfo(who) {
   const b = q('SELECT id, name FROM budgets WHERE id = ?').get(who.budgetId) || null;
-  return { id: who.user.id, name: who.user.name, username: who.user.username, admin: !!who.user.admin, budget: b, version: VERSION };
+  const sc = lastSafety(who.budgetId);
+  return { id: who.user.id, name: who.user.name, username: who.user.username, admin: !!who.user.admin, budget: b, version: VERSION, safety: sc && { ts: sc.ts, why: sc.why } };
 }
 
 // ---------- receipts ----------
@@ -505,6 +546,8 @@ async function route(req, res) {
   if (p === '/api/password' && m === 'POST') return changePassword(req, res, who);
   if (p === '/api/blob' && m === 'POST') return uploadBlob(req, res, who, url);
   if (p.startsWith('/_blob/') && m === 'GET') return serveBlob(res, who, p.slice(7));
+  if (p === '/api/budget' && m === 'PUT') return send(res, 200, replaceBudget(who, await readJson(req)));
+  if (p === '/api/safety-copy' && m === 'GET') return safetyFile(res, who);
   const doc = p.match(/^\/api\/doc\/([^/]+)\/([^/]+)$/);
   if (doc && (m === 'PATCH' || m === 'PUT')) {
     writeDoc(who, doc[1], doc[2], await readJson(req), m === 'PATCH' ? 'patch' : 'put');

@@ -340,7 +340,24 @@
     return 'A change could not be saved. Check your connection and try again.';
   }
 
-  // Replace a whole document (used by restore from backup).
+  // Replace the whole budget (restore, start fresh, move from YNAB). On YNABB's server it goes in one request: the server
+  // keeps a safety copy of what was there and swaps everything at once. Edits still waiting to save belong to the old budget.
+  Store.replaceAll = async function (d, why, onStep) {
+    if (Store.mode === 'server') {
+      const r = await api('PUT', '/api/budget', { why, docs: d });
+      Store.undoStack = []; Store.redoStack = []; group = null;
+      Store._queue = {}; saveUnsent();
+      for (const c of COLLS) Store.data[c] = Object.assign({}, d[c]);
+      if (Store.account && r.safety) Store.account.safety = r.safety;
+      emit('local');
+      return r;
+    }
+    let i = 0, n = 0;
+    for (const c in d) n += Object.keys(d[c]).length;
+    for (const c in d) for (const id in d[c]) { await Store.replace(c, id, d[c][id]); if (onStep) onStep(++i, n); }
+  };
+
+  // Replace a whole document.
   Store.replace = async function (coll, id, body) {
     Store.undoStack = []; Store.redoStack = []; group = null;
     Store.data[coll][id] = body;

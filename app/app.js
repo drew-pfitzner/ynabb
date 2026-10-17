@@ -3663,6 +3663,7 @@
         ${setGo('down', 'Download backup', 'Everything, as one .json file', 'data-action="export-json"')}
         ${setGo('sheet', 'Download transactions', 'A .csv for spreadsheets', 'data-action="export-csv"')}
         ${setGo('up', 'Restore from backup', 'Replaces the whole budget, after a check', 'for="restore-file"', 'label')}<input type="file" id="restore-file" accept=".json,application/json" hidden data-live="0">
+        ${who.safety ? setGo('down', 'Budget before the last ' + esc(who.safety.why), 'Saved ' + esc(new Date(who.safety.ts).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })) + '. Download it, then restore it to go back', 'data-action="safety-copy"') : ''}
         ${setGo('ynab', 'Move from YNAB', 'In YNAB: budget name › Export budget, then pick the .zip', 'for="ynab-file"', 'label')}<input type="file" id="ynab-file" accept=".zip,.csv,application/zip,text/csv" multiple hidden data-live="0">
       </div>
     </div>
@@ -3691,20 +3692,26 @@
     }
     openSheet({ title: 'Copy your backup', body: `<p>Downloads aren't available in this view. Copy this text into a file named ${esc(name)}.</p><textarea class="mono" rows="12" readonly>${esc(data)}</textarea>` });
   }
-  // swap the whole budget for d, document by document
-  async function replaceAll(d, onStep) {
-    const jobs = [];
+  // swap the whole budget for d; documents it doesn't have are emptied (the server keeps a safety copy first)
+  async function replaceAll(d, why, onStep) {
+    const all = {};
     for (const coll of ['meta', 'months', 'tx']) {
+      all[coll] = {};
       const ids = new Set(Object.keys(S.data[coll] || {}).concat(Object.keys(d[coll] || {})));
-      for (const docId of ids) jobs.push([coll, docId]);
+      for (const docId of ids) {
+        let body = (d[coll] || {})[docId];
+        if (!body) body = coll === 'tx' ? { t: {} } : coll === 'months' ? { assigned: {}, moves: {} } : coll === 'meta' && docId !== 'settings' ? { items: {} } : {};
+        all[coll][docId] = body;
+      }
     }
-    let i = 0;
-    for (const [coll, docId] of jobs) {
-      let body = (d[coll] || {})[docId];
-      if (!body) body = coll === 'tx' ? { t: {} } : coll === 'months' ? { assigned: {}, moves: {} } : coll === 'meta' && docId !== 'settings' ? { items: {} } : {};
-      await S.replace(coll, docId, body);
-      if (onStep) onStep(++i, jobs.length);
-    }
+    await S.replaceAll(all, why, onStep);
+  }
+  async function downloadSafetyCopy() {
+    try {
+      const r = await fetch('/api/safety-copy', { credentials: 'same-origin' });
+      if (!r.ok) throw new Error();
+      await offerFile('ynabb-safety-copy-' + E.todayISO() + '.json', JSON.stringify(await r.json(), null, 1));
+    } catch (e) { toast('The safety copy could not be downloaded. Check your connection.'); }
   }
 
   // ---------- move from YNAB ----------
@@ -3797,7 +3804,7 @@
         if (S.data.meta.settings) d.meta.settings = S.data.meta.settings;
         setSheetFoot('<span class="hint" id="ynab-prog">Bringing in your budget…</span>');
         try {
-          await replaceAll(d, (i, n) => { const el = $('#ynab-prog'); if (el) el.textContent = `Bringing in your budget… ${Math.round(i / n * 100)}%`; });
+          await replaceAll(d, 'move from YNAB', (i, n) => { const el = $('#ynab-prog'); if (el) el.textContent = `Bringing in your budget… ${Math.round(i / n * 100)}%`; });
         } catch (e) { toast('Something went wrong part way. Try again, or restore your backup.'); return; }
         closeSheet();
         UI.month = E.monthOf(E.todayISO()); UI.view = 'budget'; UI.f = NO_FILTERS(); UI.q = ''; UI.only = null; UI.rec = null; UI.editTx = null; UI.sel = null;
@@ -3820,7 +3827,8 @@
       no: closeSheet,
       yes: async () => {
         setSheetFoot('<span class="hint">Restoring…</span>');
-        await replaceAll(parsed.data);
+        try { await replaceAll(parsed.data, 'restore'); }
+        catch (e) { closeSheet(); toast('The restore did not go through, so your budget is as it was. Check your connection and try again.'); render(); return; }
         closeSheet(); toast('Budget restored'); render();
       },
     };
@@ -4081,6 +4089,7 @@
     'rec-finish': () => recFinish(0),
     'rec-adjust': () => recFinish(recState().diff),
     'export-json': exportJSON,
+    'safety-copy': downloadSafetyCopy,
     'sign-out': async () => { await fetch('/api/logout', { method: 'POST', headers: { 'X-Requested-With': 'ynabb' } }).catch(() => {}); location.href = '/login'; },
     'export-csv': exportCSV,
     'rm-rule': (el) => guard(S.write('meta', 'rules', { items: { [el.dataset.k]: null } })),
@@ -5671,7 +5680,7 @@
     },
     async startFresh() {
       const keep = S.data.meta.settings || {};
-      await replaceAll({ meta: { cats: { items: {} }, accounts: { items: {} }, rules: { items: {} }, imports: { items: {} }, settings: keep }, months: {}, tx: {} });
+      await replaceAll({ meta: { cats: { items: {} }, accounts: { items: {} }, rules: { items: {} }, imports: { items: {} }, settings: keep }, months: {}, tx: {} }, 'start fresh');
       D = snapshot();
     },
     backup: () => exportJSON(),
