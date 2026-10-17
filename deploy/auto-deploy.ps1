@@ -38,9 +38,16 @@ Log "updating $(Short $old) -> $(Short $new)"
 # back up the budget before anything changes, using the app's own backup (same encrypted files as the
 # nightly, in BACKUP_DIR\deploy). It runs inside the live container, which has BACKUP_KEY and the data.
 # No backup, no update: the code on disk is still the old version, so nothing has been touched yet.
-$out = docker exec ynabb-app node server/server.js backup-now 2>&1
-$backedUp = $LASTEXITCODE -eq 0
-$out | ForEach-Object { Log "  $_" }
+# Unless the app isn't running at all: then the update may be the fix, and the data isn't changing anyway.
+$running = (docker inspect -f '{{.State.Running}}' ynabb-app 2>$null) -eq 'true'
+if ($running) {
+  $out = docker exec ynabb-app node server/server.js backup-now 2>&1
+  $backedUp = $LASTEXITCODE -eq 0
+  $out | ForEach-Object { Log "  $_" }
+} else {
+  Log "  ynabb-app is not running, so no backup before this update (the nightly ones are still there)"
+  $backedUp = $true
+}
 if (-not $backedUp) {
   $why = (($out | ForEach-Object { "$_".Trim() }) | Where-Object { $_ }) -join ' '
   if (-not $why) { $why = 'no reason given' }

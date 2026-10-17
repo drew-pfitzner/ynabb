@@ -41,7 +41,7 @@ Updates install themselves (below). Never edit files in `C:\YNABB` by hand: auto
 
 The scheduled task **"YNABB Auto Deploy"** runs `deploy\auto-deploy.ps1` every 2 minutes. When GitHub's `main` has moved on, it:
 
-1. backs up the budget (see Backups below). If the backup fails, it stops there, leaves the old version running, logs why and tries again every 30 minutes;
+1. backs up the budget (see Backups below). If the app is running but the backup fails, it stops there, leaves the old version running, logs why and tries again every 30 minutes;
 2. fast-forwards `C:\YNABB` to it (and refuses if someone edited files by hand);
 3. rebuilds with `docker compose up -d --build`;
 4. waits for the app to answer with the new version;
@@ -69,7 +69,7 @@ Built into the server (`server/backup.js`). Nothing to schedule in Windows.
 
 - **Every night at 2am** (or as soon as the A6 is back on, if it was off), YNABB takes a consistent copy of the database. It encrypts the copy with `BACKUP_KEY` and saves it to `C:\YNABB-backups`, then copies it to iCloud at `C:\Users\drewp\iCloudDrive\JARVIS\Family\YNABB`.
 - **Kept:** 14 daily, 8 weekly and 12 monthly copies, deleted by count only. A weekly copy is made whenever the newest one is 7 or more days old, and a monthly one whenever this month doesn't have one yet, so a day when the A6 was off doesn't leave a gap. Each receipt is copied once to `blobs/` and never deleted.
-- **Before each update**, auto-deploy runs `docker exec ynabb-app node server/server.js backup-now`. That's the same encrypted backup, saved to `deploy/` (last 10 kept, apart from the nightly ones) and copied to iCloud. No backup, no update.
+- **Before each update**, auto-deploy runs `docker exec ynabb-app node server/server.js backup-now`. That's the same encrypted backup, saved to `deploy/` (last 10 kept, apart from the nightly ones) and copied to iCloud. No backup, no update (unless the app is down, when the update may be the fix).
 - **Once a week**, the newest copy is opened and compared with the live database.
 - **Status:** `/account` → Backups shows **OK**, **Not in iCloud**, **Failed** or **Not running**. "Not running" means nothing has worked for 36 hours (7+ days for the restore check), and it's the one to act on.
 
