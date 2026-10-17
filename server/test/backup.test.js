@@ -133,3 +133,86 @@ test('a box that missed 2am catches up on the next check', async () => {
   await backups.tick();
   assert.equal(db.prepare("SELECT COUNT(*) n FROM backup_runs WHERE kind = 'backup'").get().n, n);
 });
+
+// weekly and monthly copies: each test gets its own backup folder, with the same database
+const Backups = require('../backup.js');
+let n = 0;
+const fresh = () => {
+  const dir = path.join(root, 'tiers-' + ++n);
+  return { dir, b: Backups.setup({ db, dataDir: dirs.data, blobDir: path.join(dirs.data, 'blobs'), env: { BACKUP_DIR: dir, BACKUP_KEY: KEY }, log: () => {} }) };
+};
+const daysAgo = (days) => { const d = new Date(); d.setDate(d.getDate() - days); return d; };
+const nameOn = (d) => `ynabb-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-000000.ynabb`;
+const seed = (dir, tier, names) => { fs.mkdirSync(path.join(dir, tier), { recursive: true }); for (const f of names) fs.writeFileSync(path.join(dir, tier, f), 'old'); };
+const files = (dir, tier) => (fs.existsSync(path.join(dir, tier)) ? fs.readdirSync(path.join(dir, tier)).sort() : []);
+
+test('the first backup also starts the weekly and monthly copies, whatever the day', async () => {
+  const { dir, b } = fresh();
+  await b.run('backup');
+  for (const t of ['daily', 'weekly', 'monthly']) assert.equal(files(dir, t).length, 1, t);
+});
+
+test('a missed Sunday or 1st is caught up on the next run', async () => {
+  const { dir, b } = fresh();
+  const lastMonth = new Date(); lastMonth.setDate(0); // the last day of last month
+  seed(dir, 'weekly', [nameOn(daysAgo(8))]);
+  seed(dir, 'monthly', [nameOn(lastMonth)]);
+  await b.run('backup');
+  assert.equal(files(dir, 'weekly').length, 2);
+  assert.equal(files(dir, 'monthly').length, 2);
+});
+
+test('no extra weekly or monthly copy when a recent one is there', async () => {
+  const { dir, b } = fresh();
+  seed(dir, 'weekly', [nameOn(daysAgo(6))]);
+  seed(dir, 'monthly', [nameOn(new Date())]); // earlier today, so this month already has one
+  await b.run('backup');
+  assert.deepEqual(files(dir, 'weekly'), [nameOn(daysAgo(6))]);
+  assert.deepEqual(files(dir, 'monthly'), [nameOn(new Date())]);
+  assert.equal(files(dir, 'daily').length, 1);
+});
+
+test('exactly 7 days on counts as due, so the weekly copy stays on the same weekday', async () => {
+  const { dir, b } = fresh();
+  seed(dir, 'weekly', [nameOn(daysAgo(7))]);
+  await b.run('backup');
+  assert.equal(files(dir, 'weekly').length, 2);
+});
+
+test('weekly and monthly copies still rotate by count', async () => {
+  const { dir, b } = fresh();
+  seed(dir, 'weekly', Array.from({ length: 8 }, (_, i) => nameOn(daysAgo(70 - i * 7))));
+  seed(dir, 'monthly', Array.from({ length: 12 }, (_, i) => `ynabb-2019${String(i + 1).padStart(2, '0')}01-000000.ynabb`));
+  await b.run('backup');
+  assert.equal(files(dir, 'weekly').length, 8);
+  assert.ok(!files(dir, 'weekly').includes(nameOn(daysAgo(70))), 'oldest weekly went');
+  assert.equal(files(dir, 'monthly').length, 12);
+  assert.ok(!files(dir, 'monthly').includes('ynabb-20190101-000000.ynabb'), 'oldest monthly went');
+});
+
+test('a pre-deploy backup goes in its own folder and does not count as the nightly', async () => {
+  const { dir, b } = fresh();
+  const nightly = () => db.prepare("SELECT COUNT(*) n FROM backup_runs WHERE kind = 'backup'").get().n;
+  const before = nightly();
+  seed(dir, 'deploy', Array.from({ length: 12 }, (_, i) => `ynabb-2020${String(i + 1).padStart(2, '0')}01-000000.ynabb`));
+  const r = await b.run('deploy');
+  assert.equal(r.kind, 'deploy-backup');
+  assert.equal(nightly(), before);
+  assert.equal(files(dir, 'daily').length, 0);
+  assert.equal(files(dir, 'weekly').length, 0);
+  const kept = files(dir, 'deploy');
+  assert.equal(kept.length, 10);
+  assert.equal(zlib.gunzipSync(decrypt(key, fs.readFileSync(path.join(dir, 'deploy', kept.pop())))).subarray(0, 15).toString(), 'SQLite format 3');
+});
+
+test('the backup-now command backs up, or fails loudly with the reason', () => {
+  const server = path.join(__dirname, '..', 'server.js');
+  const dir = path.join(root, 'cli-backups');
+  const env = { PATH: process.env.PATH, DATA_DIR: dirs.data, BACKUP_DIR: dir, BACKUP_KEY: KEY };
+  const ok = spawnSync(process.execPath, [server, 'backup-now'], { env });
+  assert.equal(ok.status, 0, String(ok.stderr));
+  assert.equal(files(dir, 'deploy').length, 1);
+  const bad = spawnSync(process.execPath, [server, 'backup-now'], { env: { ...env, BACKUP_KEY: '' } });
+  assert.equal(bad.status, 1);
+  assert.match(String(bad.stderr), /Backup failed: BACKUP_KEY must be/);
+});

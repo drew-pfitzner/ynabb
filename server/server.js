@@ -622,6 +622,7 @@ server.requestTimeout = 120e3;
 // ---------- command line ----------
 // node server/server.js add-admin <username> <name>     make a super admin (prints a generated password)
 // node server/server.js reset-password <username>       the rare day you need SSH
+// node server/server.js backup-now                      a backup before an update (deploy/auto-deploy.ps1 runs it)
 async function cli(args) {
   const [cmd, username, ...rest] = args;
   if (cmd === 'add-admin' && username) {
@@ -638,8 +639,11 @@ async function cli(args) {
     q('DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)').run(username);
     // wrong-password locks live in the running server's memory; restarting it clears them
     console.log(`New password for "${username}": ${pw}`);
+  } else if (cmd === 'backup-now') {
+    // exits non-zero with the reason, so auto-deploy stops instead of updating without a backup
+    try { await backups.run('deploy'); } catch (e) { console.error('Backup failed: ' + e.message); process.exit(1); }
   } else {
-    console.error('Usage: server.js [add-admin <username> <name> | reset-password <username>]');
+    console.error('Usage: server.js [add-admin <username> <name> | reset-password <username> | backup-now]');
     process.exit(1);
   }
 }
