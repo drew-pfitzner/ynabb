@@ -1,5 +1,6 @@
 /* Backups: a nightly encrypted copy of the database, kept on the A6 (BACKUP_DIR) and copied offsite to
    iCloud (OFFSITE_DIR), plus a weekly test restore that proves the newest copy really opens.
+   Each auto-deploy also takes one just before it replaces the app (node server/server.js backup-now).
    Receipts are copied once each (encrypted) and never deleted.
 
    Every file is AES-256-GCM encrypted with BACKUP_KEY (32 random bytes, base64). Without that key the
@@ -15,7 +16,8 @@ const zlib = require('node:zlib');
 const sqlite = require('node:sqlite');
 
 const MAGIC = Buffer.from('YABBENC1'); // the file format's id: kept from the old name so every backup still opens
-const KEEP = { daily: 14, weekly: 8, monthly: 12 };
+// deploy: the copies taken just before each update, kept apart so a busy day of updates can't push out the nightlies
+const KEEP = { daily: 14, weekly: 8, monthly: 12, deploy: 10 };
 const BACKUP_AT_HOUR = 2; // 2am, local time on the server
 const HOUR = 3600e3, DAY = 24 * HOUR;
 // only files we made are ever rotated; yabb-….yabbbak are from before the rename and sort before the new names
@@ -47,6 +49,25 @@ const stamp = (d) => d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0')
   String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + String(d.getSeconds()).padStart(2, '0');
 const listBackups = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => DB_FILE.test(f)).sort() : []);
 // delete only what's beyond the keep count, oldest first, so a bug can never empty a folder
+// the local day a backup was taken, from its name (names are stamped in local time)
+function fileDay(f) {
+  const m = f.match(/-(\d{4})(\d{2})(\d{2})-/);
+  return m ? new Date(+m[1], m[2] - 1, +m[3]) : null;
+}
+// weekly and monthly copies go by what's already in the folder, not by today's date,
+// so a box that was off on a Sunday or the 1st still gets one on its next run
+function weeklyDue(dir, now) {
+  const newest = listBackups(dir).pop();
+  if (!newest) return true;
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((today - fileDay(newest)) / DAY) >= 7; // whole days, so a 2am run doesn't creep later each week; round for daylight saving
+}
+function monthlyDue(dir, now) {
+  const newest = listBackups(dir).pop();
+  if (!newest) return true;
+  const d = fileDay(newest);
+  return d.getFullYear() * 12 + d.getMonth() < now.getFullYear() * 12 + now.getMonth();
+}
 function rotate(dir, keep) {
   const files = listBackups(dir);
   for (const f of files.slice(0, Math.max(0, files.length - keep))) fs.unlinkSync(path.join(dir, f));
@@ -89,12 +110,14 @@ function setup({ db, dataDir, blobDir, env = process.env, log = console.log }) {
     copyBlobs(path.join(to, 'blobs'), path.join(from, 'blobs'));
   }
 
-  async function backupNow() {
+  // kind 'backup' is the nightly (daily, plus weekly and monthly when due); 'deploy' is the copy before an update
+  async function backupNow(kind) {
     if (!key) throw new Error(keyProblem);
     if (!localDir) throw new Error('BACKUP_DIR is not set.');
     const now = new Date();
     const name = 'ynabb-' + stamp(now) + '.ynabb';
-    const tmp = path.join(dataDir, 'backup-snapshot.tmp');
+    // own name per process: the deploy backup runs in a second process beside the server's nightly
+    const tmp = path.join(dataDir, `backup-snapshot-${process.pid}.tmp`);
     try {
       // a consistent copy of the live database, taken while it keeps running
       await sqlite.backup(db, tmp);
@@ -107,9 +130,11 @@ function setup({ db, dataDir, blobDir, env = process.env, log = console.log }) {
       check.close();
       if (Object.values(integrity)[0] !== 'ok') throw new Error('The database copy failed its integrity check.');
       for (const tier of Object.keys(KEEP)) fs.mkdirSync(path.join(localDir, tier), { recursive: true });
-      writeAtomic(path.join(localDir, 'daily', name), sealed);
-      if (now.getDay() === 0) writeAtomic(path.join(localDir, 'weekly', name), sealed); // Sundays
-      if (now.getDate() === 1) writeAtomic(path.join(localDir, 'monthly', name), sealed); // 1st of the month
+      const tierDir = (t) => path.join(localDir, t);
+      const tiers = kind === 'deploy' ? ['deploy'] : ['daily'];
+      if (kind !== 'deploy' && weeklyDue(tierDir('weekly'), now)) tiers.push('weekly');
+      if (kind !== 'deploy' && monthlyDue(tierDir('monthly'), now)) tiers.push('monthly');
+      for (const t of tiers) writeAtomic(path.join(tierDir(t), name), sealed);
       for (const tier of Object.keys(KEEP)) rotate(path.join(localDir, tier), KEEP[tier]);
       copyBlobs(path.join(localDir, 'blobs'));
       let offsiteOk = null, note = null;
@@ -120,9 +145,9 @@ function setup({ db, dataDir, blobDir, env = process.env, log = console.log }) {
           offsiteOk = true;
         } catch (e) { offsiteOk = false; note = 'Saved on the server but not copied to iCloud: ' + e.message; }
       }
-      record({ kind: 'backup', ok: true, offsite_ok: offsiteOk, file: name, size: sealed.length, note });
-      log(`backup ${name} (${sealed.length} bytes)${offsiteOk === false ? ' NOT offsite' : ''}`);
-      return last('backup');
+      record({ kind: recordKind(kind), ok: true, offsite_ok: offsiteOk, file: name, size: sealed.length, note });
+      log(`${kind === 'deploy' ? 'pre-deploy backup' : 'backup'} ${name} (${sealed.length} bytes, ${tiers.join(' + ')})${offsiteOk === false ? ' NOT offsite' : ''}`);
+      return last(recordKind(kind));
     } finally {
       for (const f of [tmp, tmp + '-wal', tmp + '-shm']) fs.rmSync(f, { force: true }); // SQLite leaves its journal files beside it
     }
@@ -173,12 +198,14 @@ function setup({ db, dataDir, blobDir, env = process.env, log = console.log }) {
     }
   }
 
+  // deploy backups are logged under their own name, so they never stand in for the nightly one
+  const recordKind = (kind) => (kind === 'deploy' ? 'deploy-backup' : kind);
   let busy = false;
   async function run(kind) {
     if (busy) throw new Error('A backup is already running.');
     busy = true;
-    try { return kind === 'drill' ? await drillNow() : await backupNow(); } catch (e) {
-      record({ kind, ok: false, note: e.message });
+    try { return kind === 'drill' ? await drillNow() : await backupNow(kind === 'deploy' ? 'deploy' : 'backup'); } catch (e) {
+      record({ kind: recordKind(kind), ok: false, note: e.message });
       log(`${kind} FAILED: ${e.message}`);
       throw e;
     } finally { busy = false; }

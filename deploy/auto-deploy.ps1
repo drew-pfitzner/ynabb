@@ -1,5 +1,5 @@
 # YNABB auto-deploy. The scheduled task "YNABB Auto Deploy" runs this every 2 minutes on the A6.
-# If GitHub's main branch has moved on: fast-forward C:\YNABB, rebuild, check the new version is healthy,
+# If GitHub's main branch has moved on: back up the budget, fast-forward C:\YNABB, rebuild, check the new version is healthy,
 # and roll back if it isn't. A version that failed is skipped until a newer one arrives.
 # Nothing on GitHub can reach in here; the A6 only ever pulls.
 param([string]$Repo = 'C:\YNABB', [string]$Branch = 'main')
@@ -16,8 +16,9 @@ function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Add-Content 
 $backupLine = Get-Content (Join-Path $Repo '.env') | Where-Object { $_ -match '^YNABB_BACKUP_PATH=' } | Select-Object -First 1
 $statusFile = Join-Path ($(if ($backupLine) { $backupLine -replace '^YNABB_BACKUP_PATH=', '' } else { Join-Path $Repo 'backups' })) 'deploy-status.json'
 function ReadStatus() { try { Get-Content $statusFile -Raw -ErrorAction Stop | ConvertFrom-Json } catch { $null } }
-function WriteStatus($ok, $version, $note, $failed) {
-  [ordered]@{ ok = $ok; version = $version; note = $note; failedCommit = $failed; ts = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() } |
+function Now() { [DateTimeOffset]::Now.ToUnixTimeMilliseconds() }
+function WriteStatus($ok, $version, $note, $failed, $backupFailed = $null) {
+  [ordered]@{ ok = $ok; version = $version; note = $note; failedCommit = $failed; backupFailedCommit = $backupFailed; ts = (Now) } |
     ConvertTo-Json | Set-Content -Encoding UTF8 $statusFile
 }
 function Short($sha) { $sha.Substring(0, 7) }
@@ -30,8 +31,30 @@ $onBranch = (git rev-parse --abbrev-ref HEAD).Trim() -eq $Branch
 if ($old -eq $new -and $onBranch) { exit 0 }
 $prev = ReadStatus
 if ($prev -and $prev.failedCommit -eq $new) { exit 0 } # already failed once; wait for a fix
+# the backup before this version failed: try again every 30 minutes, not every 2, so the log stays readable
+if ($prev -and $prev.backupFailedCommit -eq $new -and ((Now) - $prev.ts) -lt 30 * 60 * 1000) { exit 0 }
 
 Log "updating $(Short $old) -> $(Short $new)"
+# back up the budget before anything changes, using the app's own backup (same encrypted files as the
+# nightly, in BACKUP_DIR\deploy). It runs inside the live container, which has BACKUP_KEY and the data.
+# No backup, no update: the code on disk is still the old version, so nothing has been touched yet.
+# Unless the app isn't running at all: then the update may be the fix, and the data isn't changing anyway.
+$running = (docker inspect -f '{{.State.Running}}' ynabb-app 2>$null) -eq 'true'
+if ($running) {
+  $out = docker exec ynabb-app node server/server.js backup-now 2>&1
+  $backedUp = $LASTEXITCODE -eq 0
+  $out | ForEach-Object { Log "  $_" }
+} else {
+  Log "  ynabb-app is not running, so no backup before this update (the nightly ones are still there)"
+  $backedUp = $true
+}
+if (-not $backedUp) {
+  $why = (($out | ForEach-Object { "$_".Trim() }) | Where-Object { $_ }) -join ' '
+  if (-not $why) { $why = 'no reason given' }
+  Log "FAILED: could not back up before updating, so YNABB stayed on $(Short $old). Will try again in 30 minutes."
+  WriteStatus $false (Short $old) "Could not take a backup before updating, so YNABB stayed on $(Short $old): $why" $null $new
+  exit 1
+}
 if (-not $onBranch) { git checkout -q $Branch 2>&1 | ForEach-Object { Log "  $_" } }
 git merge --ff-only -q "origin/$Branch" 2>&1 | ForEach-Object { Log "  $_" }
 if ($LASTEXITCODE -ne 0 -or (git rev-parse HEAD).Trim() -ne $new) {
