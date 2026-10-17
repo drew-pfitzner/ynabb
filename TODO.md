@@ -17,7 +17,6 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ### From the 17 Oct check-over (Drew), most important first
 
-1. [ ] **Changes can vanish on a weak signal.** After two failed saves `store.js` (~244) drops the change; the screen shows it until the next reconnect, then it's gone, and the leave-page warning doesn't catch it. Keep unsaved changes queued (and in the browser) and keep retrying.
 1. [ ] **Safety copy before big replaces.** Restore, Start fresh (guide) and Move from YNAB don't take a backup first, and restore has no error handling: it replaces documents one by one, so a dropped connection leaves half a budget (`app.js` ~3810). Have the server snapshot first and restore in one go.
 1. [ ] **Backup before each deploy** in `deploy/auto-deploy.ps1`. Later: an admin "put the budget back to 3pm" tool using the `changes` table.
 1. [ ] **Login lock-outs:** count wrong passwords per username *and* address, so a stranger can't keep a family login locked.
@@ -25,7 +24,6 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 1. [ ] **Warn the admin in the app** when the nightly backup is overdue or failed (today it's only on the admin page).
 1. [ ] **Weekly and monthly backups** only happen if the run lands on a Sunday or the 1st (`backup.js` ~95). Make one whenever the last is over 7 days (or a month) old.
 1. [ ] **Two-factor login on both GitHub accounts** (whatever merges goes live). Optionally pin the Docker and Actions versions (`tailscale:stable` floats).
-1. [ ] **Tests for the budget sums** (`computeMonth`: carry-forward, overspending, Ready to Assign, targets).
 1. [ ] **Undo can wipe the other person's edit** made to the same transaction since. Skip the undo (or ask) when it has changed.
 1. [ ] **Small tidy-ups:** clear expired sessions; a mistyped web address gives a server error instead of "not found".
 
@@ -40,6 +38,8 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-10-17: **Changes no longer vanish on a weak signal (Drew).** A change that can't reach YNABB now stays queued and keeps retrying (faster when the connection comes back) instead of being dropped after two tries. It's also kept in the browser, so closing the page, reloading or being signed out doesn't lose it: it's sent next time YNABB opens. Leaving the page still warns while anything is unsaved.
+- 2026-10-17: **Tests for the budget sums (Drew).** 16 tests cover carry-forward, overspending, Ready to Assign, splits, transfers, credit cards, group totals and targets. No bugs found. Note: `overspentBefore` counts one carried overspend again each month, but nothing shows it yet.
 - 2026-10-17: **Import no longer skips a real repeat transfer (Drew).** A line with no dd/mm in it (e.g. a $10 transfer on Monday and again on Tuesday) was skipped as "already in" when the new file started after the first one. Now it's only called a re-send when the earlier line's date falls inside the new file's dates but is missing from it. ATM lines name their day and time, so they're still caught either way. The dd/mm rule is left as is: the written date and shop make a real repeat very unlikely.
 - 2026-10-17: **ATM withdrawals aren't doubled when they clear (Drew).** NAB writes a withdrawal as "ATM 15/10 09:09 280-282 BANNA AVE GRIFFITH" at first and "NABATM CSH 15th09:09GRIFFITH" once it clears, so NAB Family was out by $100. The day and time now link the two. On import the entry takes the final line (like a pending purchase), and in reconcile the pair shows under Possible Matches.
 - 2026-10-17: **Lines with no date in them aren't doubled when NAB re-sends them (Drew).** Re-importing Transactions 8 left NAB Family out by $99.99: the $100 ATM withdrawal and the BrickX $0.01 had both come in again with a new processing date, and Dani's check needs a dd/mm in the line. Now a line with the exact amount, the same words (moved about or cut short is fine) and within 2 days of an earlier import is skipped as already in. A different ATM time or reference counts as a different line. Reconcile also offers several doubles at once when together they explain the gap. A merged transfer keeps your own name ("Cash", not "NAB (ATM)").

@@ -128,10 +128,39 @@
     if (q && q.patch) doc = deepMerge(doc, q.patch);
     return doc;
   }
+  // Edits not yet saved are also kept in this browser, so a weak signal, a reload or a sign-out doesn't lose them.
+  let unsentKey = null;
+  function saveUnsent() {
+    if (!unsentKey) return;
+    const out = {};
+    for (const path in Store._queue) {
+      const q = Store._queue[path];
+      const p = q.inflight && q.patch ? deepMerge(q.inflight, q.patch) : q.inflight || q.patch;
+      if (p) out[path] = p;
+    }
+    try { if (Object.keys(out).length) localStorage.setItem(unsentKey, JSON.stringify(out)); else localStorage.removeItem(unsentKey); } catch (e) { /* storage blocked */ }
+  }
+  // a reconnect or the device coming back online retries straight away instead of waiting out the pause
+  let wakers = [];
+  const wakeRetries = () => { const w = wakers; wakers = []; w.forEach((f) => f()); };
+  const pause = (ms) => new Promise((r) => { const t = setTimeout(done, ms); function done() { clearTimeout(t); wakers = wakers.filter((f) => f !== done); r(); } wakers.push(done); });
+  if (typeof window !== 'undefined') window.addEventListener('online', wakeRetries);
+
   function initServer(me) {
     Store.mode = 'server';
     Store.account = me;
     Store.me = { id: me.id, name: me.name };
+    unsentKey = 'ynabb-unsent-v1:' + me.id;
+    // edits left over from last time (page closed or signed out before they saved) are sent again
+    try {
+      const left = JSON.parse(localStorage.getItem(unsentKey) || 'null');
+      for (const path in left || {}) {
+        const cut = path.indexOf('/'), coll = path.slice(0, cut), id = path.slice(cut + 1);
+        if (!COLLS.includes(coll) || !isObj(left[path])) continue;
+        const q = Store._queue[path] = { patch: left[path], busy: null };
+        q.busy = flush(coll, id, q).catch(() => {});
+      }
+    } catch (e) { /* nothing usable saved */ }
     let people = null;
     Store.user = {
       me: async () => Store.me,
@@ -165,6 +194,7 @@
         Store.loaded[c] = true;
       }
       if (Store.error === LOST) { Store.status = 'idle'; Store.error = null; }
+      wakeRetries();
       emit('remote');
     });
     es.addEventListener('doc', (e) => {
@@ -249,6 +279,7 @@
     const path = coll + '/' + id;
     const q = Store._queue[path] = Store._queue[path] || { patch: null, busy: null };
     q.patch = q.patch ? deepMerge(q.patch, patch) : patch;
+    saveUnsent();
     if (!q.busy) q.busy = flush(coll, id, q);
     return q.busy;
   };
@@ -258,23 +289,33 @@
     Store.status = 'saving'; emit('status');
     while (q.patch) {
       const p = q.patch; q.patch = null; q.inflight = p;
-      try {
-        await writeOne(coll, id, p);
-        q.inflight = null;
-      } catch (e) {
-        if (e && e.code === 'unavailable') {
-          await new Promise((r) => setTimeout(r, 800 + Math.random() * 800));
-          try { await writeOne(coll, id, p); q.inflight = null; continue; } catch (e2) { e = e2; }
+      for (let tries = 0; ; tries++) {
+        try {
+          await writeOne(coll, id, p);
+          q.inflight = null;
+          saveUnsent();
+          break;
+        } catch (e) {
+          // No connection: keep the change and keep trying, slower each time (up to 30s), until it saves.
+          // It stays on screen and in this browser meanwhile, and leaving the page still warns.
+          if (e && e.code === 'unavailable') {
+            if (tries >= 1) { Store.status = 'error'; Store.error = Store.mode === 'server' ? LOST : errorText(e); emit('status'); }
+            await pause(Math.min(30000, 800 * 2 ** tries) * (1 + Math.random() / 2));
+            continue;
+          }
+          // The server turned it down. A sign-out keeps it in this browser for after signing back in; anything else would fail again.
+          Store.status = 'error';
+          Store.error = errorText(e);
+          if (e && e.code === 'revoked') { q.patch = q.patch ? deepMerge(p, q.patch) : p; q.inflight = null; }
+          else { q.inflight = null; saveUnsent(); }
+          q.busy = null;
+          emit('status');
+          throw e;
         }
-        Store.status = 'error';
-        Store.error = errorText(e);
-        q.busy = null; q.inflight = null;
-        emit('status');
-        throw e;
       }
     }
     q.busy = null; q.inflight = null;
-    if (!Object.values(Store._queue).some((x) => x.busy)) Store.status = 'idle';
+    if (!Object.values(Store._queue).some((x) => x.busy)) { Store.status = 'idle'; if (Store.error === LOST) Store.error = null; }
     emit('status');
   }
 

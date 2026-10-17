@@ -15,3 +15,6 @@ node_modules/
 offsite/
 deploy.log
 .claude/settings.local.json
+
+# Claude helper copies of the repo
+.claude/worktrees/
