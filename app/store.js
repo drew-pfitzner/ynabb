@@ -357,6 +357,16 @@
     for (const c in d) for (const id in d[c]) { await Store.replace(c, id, d[c][id]); if (onStep) onStep(++i, n); }
   };
 
+  // Put the budget back to how it was at a time (YNABB's server only). Without go, just what would change.
+  // The new budget arrives as a fresh snapshot on the live connection, like a restore on another device.
+  Store.rewind = async (ts, go) => {
+    if (!go) return api('GET', '/api/rewind?ts=' + ts);
+    const r = await api('POST', '/api/rewind', { ts });
+    Store.undoStack = []; Store.redoStack = []; group = null;
+    if (Store.account && r.safety) Store.account.safety = r.safety;
+    return r;
+  };
+
   // Replace a whole document.
   Store.replace = async function (coll, id, body) {
     Store.undoStack = []; Store.redoStack = []; group = null;

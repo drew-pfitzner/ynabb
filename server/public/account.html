@@ -55,18 +55,6 @@
       <form class="row" id="add-budget"><input type="text" id="nb-name" placeholder="New budget name" style="flex:1;min-width:180px" required><button class="btn" type="submit">Add budget</button></form>
     </div>
 
-    <h2>Put a budget back to an earlier time</h2>
-    <form class="card" id="rewind">
-      <div class="grid">
-        <div><label for="rw-budget">Budget</label><select id="rw-budget"></select></div>
-        <div><label for="rw-when">Back to</label><input type="datetime-local" id="rw-when" required></div>
-      </div>
-      <div class="row"><button class="btn" type="submit">See what changes</button></div>
-      <div id="rw-look" hidden></div>
-      <div class="msg" id="rw-msg" role="status" hidden></div>
-      <p class="fine" style="margin-top:12px">Every change is kept, so YNABB can rebuild a budget as it was at any moment. Everything done after that time is undone, for everyone. A copy of the budget as it is now is kept first: in the app, Settings › Budget before the last put back.</p>
-    </form>
-
     <h2>People</h2>
     <div class="card">
       <div class="tbl"><table><thead><tr><th>Person</th><th>Budget</th><th>Last signed in</th><th></th></tr></thead><tbody id="users"></tbody></table></div>

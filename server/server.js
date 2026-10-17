@@ -525,14 +525,6 @@ async function adminAction(req, res, who, parts) {
     q('UPDATE budgets SET name = ? WHERE id = ?').run(name, id);
     return send(res, 200, { ok: true });
   }
-  // put a budget back to how it was at a time: GET shows what would change, POST does it (keeping a safety copy first)
-  if (what === 'budgets' && id && extra === 'rewind') {
-    budgetOk(id);
-    const ts = Number(req.method === 'GET' ? new URL(req.url, 'http://x').searchParams.get('ts') : body.ts);
-    if (!Number.isFinite(ts) || ts <= 0 || ts > Date.now()) fail(400, 'Choose a time in the past.');
-    if (req.method === 'GET') return send(res, 200, rewindPreview(id, ts));
-    if (req.method === 'POST') return send(res, 200, replaceDocs(id, who.user.id, budgetAt(id, ts).then, 'put back'));
-  }
   if (what === 'backup-now' && req.method === 'POST') {
     try { await backups.run(body.kind === 'drill' ? 'drill' : 'backup'); } catch (e) { fail(400, e.message); }
     return send(res, 200, backups.status());
@@ -642,6 +634,13 @@ async function route(req, res) {
   if (p.startsWith('/_blob/') && m === 'GET') return serveBlob(res, who, p.slice(7));
   if (p === '/api/budget' && m === 'PUT') return send(res, 200, replaceBudget(who, await readJson(req)));
   if (p === '/api/safety-copy' && m === 'GET') return safetyFile(res, who);
+  // put the budget back to how it was at a time: GET shows what would change, POST does it (keeping a safety copy first)
+  if (p === '/api/rewind' && (m === 'GET' || m === 'POST')) {
+    const ts = Number(m === 'GET' ? url.searchParams.get('ts') : ((await readJson(req)) || {}).ts);
+    if (!Number.isFinite(ts) || ts <= 0 || ts > Date.now()) fail(400, 'Choose a time in the past.');
+    if (m === 'GET') return send(res, 200, rewindPreview(who.budgetId, ts));
+    return send(res, 200, replaceDocs(who.budgetId, who.user.id, budgetAt(who.budgetId, ts).then, 'put back'));
+  }
   const doc = p.match(/^\/api\/doc\/([^/]+)\/([^/]+)$/);
   if (doc && (m === 'PATCH' || m === 'PUT')) {
     writeDoc(who, doc[1], doc[2], await readJson(req), m === 'PATCH' ? 'patch' : 'put');

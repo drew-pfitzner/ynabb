@@ -939,6 +939,15 @@ button.pm-chip { cursor: pointer; padding-right: 10px; }
 .set-imps .imp-list { border: 0; border-radius: 0; background: none; }
 .set-imps .imp-list li { padding: 8px 0; }
 .set-imps .hint { margin: 0; }
+.rw-h { display: flex; align-items: center; gap: 8px; }
+.rw-h .ck-i { margin-left: 0; text-transform: none; }
+.rw-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 2px; }
+.rw-row input { flex: 1 1 180px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 14px; color: var(--ink); }
+.rw-tbl { width: 100%; border-collapse: collapse; margin: 8px 0 6px; font-size: 13px; }
+.rw-tbl th, .rw-tbl td { padding: 5px 0; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
+.rw-tbl th { font-size: 11px; color: var(--muted); font-weight: 600; }
+.rw-tbl th:first-child, .rw-tbl td:first-child { text-align: left; }
+.set-rw .hint + .btn { margin-top: 8px; }
 .set-ver { grid-column: 1 / -1; text-align: center; font-size: 12px; color: var(--muted); margin: 24px 0 8px; }
 @media (max-width: 920px) { .set { grid-template-columns: minmax(0, 1fr); max-width: 560px; } }
 .rules { list-style: none; padding: 0; margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }

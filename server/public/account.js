@@ -39,9 +39,6 @@ async function load() {
     <td>${b.docs ? when(b.last_change) : '<span class="muted">empty</span>'}</td>
     <td>${me.budget && me.budget.id === b.id ? '' : `<button class="btn small" data-open="${esc(b.id)}">Open</button>`}<button class="btn small" data-rename="${esc(b.id)}">Rename</button></td></tr>`).join('');
   $('#nu-budget').innerHTML = data.budgets.map((b) => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
-  const rwPick = $('#rw-budget').value || (me.budget && me.budget.id);
-  $('#rw-budget').innerHTML = data.budgets.map((b) => `<option value="${esc(b.id)}" ${b.id === rwPick ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
-  if (!$('#rw-when').value) $('#rw-when').value = localInput(Date.now() - 3600e3);
   $('#users').innerHTML = data.users.map((u) => {
     const locked = u.locked_until > Date.now();
     const chips = (u.admin ? ' <span class="chip accent">admin</span>' : '') + (u.disabled ? ' <span class="chip bad">turned off</span>' : '') + (locked ? ' <span class="chip bad">locked</span>' : '');
@@ -88,48 +85,6 @@ document.addEventListener('click', async (e) => {
     say(m, btn.dataset.backup === 'drill' ? 'The newest backup opened and checked out.' : 'Backed up.', true);
   } catch (err) { say(m, err.message); await load(); }
   $$('button[data-backup]').forEach((x) => (x.disabled = false));
-});
-
-// ---------- put a budget back ----------
-// datetime-local wants the local time as "2026-10-17T15:00"
-const localInput = (ts) => { const d = new Date(ts - new Date(ts).getTimezoneOffset() * 60e3); return d.toISOString().slice(0, 16); };
-const money = (c) => (c < 0 ? '−' : '') + '$' + (Math.abs(c) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-let rwLooked = null;
-function rewindAsk() {
-  const ts = new Date($('#rw-when').value).getTime();
-  return { id: $('#rw-budget').value, ts, name: $('#rw-budget').selectedOptions[0].textContent };
-}
-$('#rewind').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const a = rewindAsk(), m = $('#rw-msg'), box = $('#rw-look');
-  m.hidden = true; box.hidden = true; rwLooked = null;
-  if (!(a.ts < Date.now())) { say(m, 'Choose a time in the past.'); return; }
-  try {
-    const r = await api('GET', `/api/admin/budgets/${a.id}/rewind?ts=${a.ts}`);
-    const row = (label, k, f = (x) => x) => `<tr><td>${label}</td><td>${f(r.then[k])}</td><td>${f(r.now[k])}</td></tr>`;
-    const who = r.since.map((p) => `${esc(p.name)} made ${p.changes} change${p.changes === 1 ? '' : 's'} (${p.first === p.last ? 'at ' + when(p.first) : when(p.first) + ' to ' + when(p.last)})`).join('; ');
-    box.innerHTML = `<div class="tbl"><table><thead><tr><th></th><th>${esc(when(a.ts))}</th><th>Now</th></tr></thead><tbody>
-      ${row('Transactions', 'transactions')}${row('Total of all transactions', 'total', money)}${row('Accounts', 'accounts')}${row('Categories', 'categories')}</tbody></table></div>
-      <p style="margin-top:12px">${r.since.length ? `Since then: ${who}. All of it is undone.` : 'Nothing has changed since then.'}</p>
-      ${r.then.transactions === 0 && r.now.transactions ? '<p class="msg bad">At that time this budget was empty. Putting it back empties it.</p>' : ''}
-      ${r.since.length ? `<div class="row"><button class="btn primary" type="button" id="rw-go">Put ${esc(a.name)} back to ${esc(when(a.ts))}</button></div>` : ''}`;
-    box.hidden = false;
-    rwLooked = a;
-  } catch (err) { say(m, err.message); }
-});
-// changing the budget or time means looking again before putting it back
-['#rw-budget', '#rw-when'].forEach((s) => $(s).addEventListener('input', () => { $('#rw-look').hidden = true; rwLooked = null; }));
-document.addEventListener('click', async (e) => {
-  if (!e.target.closest('#rw-go') || !rwLooked) return;
-  const a = rwLooked, m = $('#rw-msg');
-  if (!confirm(`Put ${a.name} back to ${when(a.ts)}? Everything done since then is undone for everyone. A copy of the budget as it is now is kept.`)) return;
-  e.target.disabled = true;
-  try {
-    await api('POST', `/api/admin/budgets/${a.id}/rewind`, { ts: a.ts });
-    $('#rw-look').hidden = true; rwLooked = null;
-    say(m, `${a.name} is back to how it was at ${when(a.ts)}. Open devices update by themselves. To undo this, in the app go to Settings › Budget before the last put back, download it and restore it.`, true);
-    await load();
-  } catch (err) { say(m, err.message); e.target.disabled = false; }
 });
 
 $('#signout').addEventListener('click', async () => {

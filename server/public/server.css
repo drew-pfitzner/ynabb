@@ -55,6 +55,3 @@ td .btn { margin: 2px 4px 2px 0; }
 .current td:first-child { box-shadow: inset 3px 0 var(--accent); }
 td select { min-width: 140px; }
 #backups td:first-child, #backups td:nth-child(3) { white-space: nowrap; }
-input[type=datetime-local] { width: 100%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
-#rw-look table { margin-top: 16px; }
-#rw-look td:not(:first-child), #rw-look th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }

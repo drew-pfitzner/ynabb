@@ -2963,6 +2963,57 @@
     html += legacy.map((g) => `<li><span><b>Earlier import</b> · ${esc(acctName(g.acct))} · ${g.ts ? esc(when(g.ts)) : 'unknown time'}<br><small class="muted">${g.ids.length} ${g.ids.length === 1 ? 'transaction' : 'transactions'}</small></span><button class="btn xs" data-action="legacy-import" data-key="${esc(g.key)}">Review & remove</button></li>`).join('');
     return html + '</ul>';
   }
+  // ---------- put the budget back to an earlier time ----------
+  // datetime-local wants the local time as "2026-10-17T15:00"
+  const localInput = (ts) => new Date(ts - new Date(ts).getTimezoneOffset() * 60e3).toISOString().slice(0, 16);
+  const rwWhen = (ts) => new Date(ts).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  function rewindHTML() {
+    const info = !!UI.rwInfo, look = UI.rwLook;
+    let out = '';
+    if (look) {
+      const row = (label, k, f = String) => `<tr><td>${label}</td><td>${f(look.then[k])}</td><td>${f(look.now[k])}</td></tr>`;
+      const who = look.since.map((p) => `${esc(p.name)} made ${p.changes} ${p.changes === 1 ? 'change' : 'changes'}`).join(' and ');
+      out = `<table class="rw-tbl"><thead><tr><th></th><th>${esc(rwWhen(look.ts))}</th><th>Now</th></tr></thead><tbody>
+        ${row('Transactions', 'transactions')}${row('Total', 'total', money)}${row('Accounts', 'accounts')}${row('Categories', 'categories')}</tbody></table>
+        ${look.since.length ? `<p class="hint">Since then ${who}. Putting it back undoes all of that.</p>` : '<p class="hint">Nothing has changed since then.</p>'}
+        ${look.then.transactions === 0 && look.now.transactions ? '<p class="hint warn">The budget was empty at that time, so this would empty it.</p>' : ''}
+        ${look.since.length ? `<button class="btn sm danger" data-action="rw-go">Put the budget back to ${esc(rwWhen(look.ts))}</button>` : ''}`;
+    }
+    return `<div class="set-imps set-rw">
+      <h3 class="rw-h">Put the budget back to an earlier time<button class="ck-i${info ? ' on' : ''}" data-action="rw-info" aria-expanded="${info}" aria-label="How this works" title="How this works">?</button></h3>
+      ${info ? `<p class="ck-hint">Undoes everything either of you did after the time you pick: edits, imports, deletes. YNABB keeps every change, so it can rebuild the budget as it was. You see what changes first. The budget as it is now is kept too, so you can go back (Backup and moving › Budget before the last put back).</p>` : ''}
+      <div class="rw-row"><input id="rw-when" type="datetime-local" data-live="0" aria-label="Put back to" value="${esc(UI.rwWhen || localInput(Date.now() - 3600e3))}" max="${localInput(Date.now())}"><button class="btn sm" data-action="rw-look">See what changes</button></div>
+      ${out}</div>`;
+  }
+  async function rewindLook() {
+    const v = ($('#rw-when') || {}).value;
+    UI.rwWhen = v;
+    const ts = v ? new Date(v).getTime() : NaN;
+    if (!(ts < Date.now())) { toast('Choose a time in the past.'); return; }
+    try { UI.rwLook = await S.rewind(ts); } catch (e) { UI.rwLook = null; toast(e && e.message ? e.message : 'That did not work. Check your connection and try again.'); }
+    render();
+  }
+  function openRewind() {
+    const look = UI.rwLook;
+    if (!look) return;
+    openSheet({
+      title: 'Put the budget back',
+      body: `<p>This puts the whole budget back to how it was at <b>${esc(rwWhen(look.ts))}</b>, for both of you. Everything done since then is undone.</p>
+        <p class="hint">The budget as it is now is kept. To go back, use Settings › Backup and moving › Budget before the last put back.</p>`,
+      foot: '<button class="btn danger" data-saction="yes">Put it back</button><button class="btn" data-saction="no">Cancel</button>',
+    });
+    sheet.actions = {
+      no: closeSheet,
+      yes: async () => {
+        setSheetFoot('<span class="hint">Putting it back…</span>');
+        try { await S.rewind(look.ts, true); }
+        catch (e) { closeSheet(); toast(e && e.message ? e.message : 'That did not go through, so the budget is as it was.'); return; }
+        UI.rwLook = null; UI.rwWhen = null;
+        closeSheet(); toast(`The budget is back to ${rwWhen(look.ts)}.`); render();
+      },
+    };
+  }
+
   function openUndoImport(id) {
     const b = S.items('imports')[id];
     if (!b) return;
@@ -3657,6 +3708,7 @@
         <div class="set-in"><input id="set-bankurl" type="url" inputmode="url" autocomplete="off" data-live="0" placeholder="https://ib.nab.com.au" value="${esc(S.settings().bankUrl || '')}"></div>
         ${setGo('payee', 'Payees and rules', 'Rename, merge and tidy bank descriptions', 'data-action="payees"')}
         <div class="set-imps">${importsListHTML() || '<h3>Recent imports</h3><p class="hint">No imports yet.</p>'}</div>
+        ${S.mode === 'server' ? rewindHTML() : ''}
       </div>
       <h2>Backup and moving</h2>
       <div class="set-card">
@@ -3940,6 +3992,9 @@
     'approve-all': () => approve(filteredTx().filter((t) => t.approved === false && !t.match && (t.cat || (t.splits && t.splits.length) || t.transfer || isTrack(t.acct))).map((t) => t.id)),
     unmatch: async (el) => { const id = el.dataset.id; if (UI.editTx === id) { await saveInline(); fresh(); } await unmatch(id); render(); },
     'undo-import': (el) => openUndoImport(el.dataset.id),
+    'rw-info': () => { UI.rwInfo = !UI.rwInfo; render(); },
+    'rw-look': rewindLook,
+    'rw-go': openRewind,
     'legacy-import': (el) => openLegacyImport(el.dataset.key),
     'approve-updates': () => approve(filteredTx().filter((t) => t.match && t.match.kind === 'update').map((t) => t.id)),
     'more-tx': () => { UI.limit += 200; render(); },
@@ -4285,6 +4340,7 @@
       if (u && !/^https:\/\/[^\s/]+\.[^\s]+/i.test(u)) { toast("That doesn't look like a web address."); return; }
       guard(S.write('meta', 'settings', { bankUrl: u || null })); toast(u ? 'Bank login page saved.' : 'Bank login page removed.'); return;
     }
+    if (el.id === 'rw-when') { UI.rwWhen = el.value; UI.rwLook = null; render(); return; }
     if (el.id === 'set-cur') { guard(S.write('meta', 'settings', { currency: el.value })); return; }
     if (el.id === 'restore-file' && el.files[0]) { restore(el.files[0]); el.value = ''; }
     if (el.id === 'ynab-file' && el.files.length) { openYnab([...el.files]); el.value = ''; }

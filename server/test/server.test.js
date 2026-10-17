@@ -454,7 +454,7 @@ test('a whole-budget replace keeps a safety copy and swaps everything at once', 
   assert.equal((await b.call('GET', '/api/data')).json.tx['2026-07'], undefined);
 });
 
-test('the admin can put a budget back to an earlier time, with a safety copy', async () => {
+test('the budget can be put back to an earlier time, with a safety copy', async () => {
   const b = browser();
   await b.login('drew', 'correct horse battery');
   const nb = await b.call('POST', '/api/admin/budgets', { name: 'Rewind test' });
@@ -469,22 +469,22 @@ test('the admin can put a budget back to an earlier time, with a safety copy', a
   // after "3pm": one deleted, one edited, a new month
   await b.call('PATCH', '/api/doc/tx/2026-09', { t: { a: { memo: 'oops' }, b: null } });
   await b.call('PATCH', '/api/doc/tx/2026-10', { t: { c: { id: 'c', amt: -100 } } });
-  const look = await b.call('GET', `/api/admin/budgets/${id}/rewind?ts=${then}`);
+  const look = await b.call('GET', `/api/rewind?ts=${then}`);
   assert.equal(look.status, 200);
   assert.deepEqual(look.json.then, { transactions: 2, total: -1200, accounts: 1, categories: 0 });
   assert.equal(look.json.now.transactions, 2);
   assert.equal(look.json.since[0].changes, 2);
-  const go = await b.call('POST', `/api/admin/budgets/${id}/rewind`, { ts: then });
+  const go = await b.call('POST', '/api/rewind', { ts: then });
   assert.equal(go.status, 200);
   const data = (await b.call('GET', '/api/data')).json;
   assert.deepEqual(data.tx['2026-09'], { t: { a: { id: 'a', amt: -500 }, b: { id: 'b', amt: -700 } } });
   assert.deepEqual(data.tx['2026-10'], { t: {} });
   assert.deepEqual((await b.call('GET', '/api/safety-copy')).json.data.tx['2026-10'], { t: { c: { id: 'c', amt: -100 } } });
   // the put-back is itself in the history, so it can be undone the same way
-  assert.equal((await b.call('GET', `/api/admin/budgets/${id}/rewind?ts=${Date.now()}`)).status, 200);
+  assert.equal((await b.call('GET', `/api/rewind?ts=${Date.now()}`)).status, 200);
   // a record the history can't explain makes it refuse rather than guess
   db.prepare('INSERT INTO docs VALUES (?, ?, ?, ?, ?)').run(id, 'tx', '2020-01', '{"t":{}}', Date.now());
-  const refused = await b.call('POST', `/api/admin/budgets/${id}/rewind`, { ts: then });
+  const refused = await b.call('POST', '/api/rewind', { ts: then });
   assert.equal(refused.status, 409);
-  assert.equal((await b.call('GET', `/api/admin/budgets/${id}/rewind?ts=${Date.now() + 60e3}`)).status, 400);
+  assert.equal((await b.call('GET', `/api/rewind?ts=${Date.now() + 60e3}`)).status, 400);
 });
