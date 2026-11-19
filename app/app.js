@@ -242,8 +242,18 @@
       ensurePayCat(a).finally(() => healing.delete(a.id));
     }
   }
+  // ynabb…/#add opens straight to a new transaction: for a phone's Action button or a Home Screen shortcut,
+  // so a purchase and its receipt go in at the checkout
+  function addFromLink() {
+    if (location.hash !== '#add') return;
+    history.replaceState(null, '', location.pathname + location.search); // once only, not again on refresh
+    UI.view = 'tx'; saveUI(); render(); // a reconcile you're part way through stays as it was
+    openTx(null);
+  }
+  window.addEventListener('hashchange', () => { if (S.ready()) addFromLink(); });
   function render() {
     if (!S.ready()) { renderChrome(); view().innerHTML = '<p class="loading">Loading your budget…</p>'; return; }
+    if (location.hash === '#add') setTimeout(addFromLink, 0);
     const a = document.activeElement;
     const inView = a && view().contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName);
     // don't wipe out something the person is in the middle of typing; render once they leave the field.
