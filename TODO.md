@@ -31,6 +31,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-11-19: **Uncategorised split parts show up (Dani).** A split with a part that has no category now appears under the Uncategorized filter and the "needs a category" count, matching the budget page's count (Kmart $80.75 on 24 Oct had an $8 part with none).
 - 2026-11-19: **Undoing an import undoes its reconcile (Dani).** If the account was reconciled against that file, Undo import puts "Last reconciled" back to what it was before the file, and unlocks anything locked in after that date (still cleared), so the next reconcile checks it again. Imports from before today didn't save the earlier date, so for those it uses the last reconciled day before the file.
 - 2026-11-19: **See what YNABB did, and open any row (Dani).** The "What YNABB sorted out" card lists the transactions behind each line (up to 5 right there, more behind **Show these**); tap one to open it. Every row in Needs a Category and New Transactions has a pencil that opens the full transaction for a note, a split or a receipt; the quick category picker still works on the rest of the row.
 - 2026-11-19: **You approve the categories (Dani).** Reconcile still fixes the balance by itself, but no longer approves new bank lines with guessed categories: they wait in the list for you to check (Woolies on a trip isn't groceries). It finishes reconciling once you've approved them.

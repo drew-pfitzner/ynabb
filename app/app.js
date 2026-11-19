@@ -1268,7 +1268,7 @@
       if (f.to && t.date > f.to) return false;
       if (min != null && Math.abs(t.amt) < min) return false;
       if (max != null && Math.abs(t.amt) > max) return false;
-      if (f.cat === '_none' && (t.cat || (t.splits && t.splits.length) || t.transfer || isTrack(t.acct))) return false;
+      if (f.cat === '_none' && !isUncat(t)) return false;
       if (f.cat === INCOME && !E.txParts(t).some((p) => p.cat === INCOME)) return false;
       if (catSet && !E.txParts(t).some((p) => catSet.has(p.cat))) return false;
       if (f.status === 'review' && t.approved !== false) return false;
@@ -2226,7 +2226,8 @@
   }
 
   // needs a category: not a transfer, split or tracking entry, and none chosen
-  const isUncat = (t) => !t.cat && !(t.splits && t.splits.length) && !(t.transfer && !trkXfer(t)) && !isTrack(t.acct);
+  // a split counts while any part of it has no category, the same as the budget page's count
+  const isUncat = (t) => (t.splits && t.splits.length ? t.splits.some((p) => !p.cat) : !t.cat) && !(t.transfer && !trkXfer(t)) && !isTrack(t.acct);
   function txCatLabel(t) {
     if (t.transfer) {
       const x = `${isDebt(t.transfer) && t.amt < 0 ? 'Payment to' : isDebt(t.acct) && t.amt > 0 ? 'Payment from' : t.amt < 0 ? 'Transfer to' : 'Transfer from'} ${esc(acctName(t.transfer))}`;
