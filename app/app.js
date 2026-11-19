@@ -3104,7 +3104,9 @@
         if (st.days) saveDayBalances(st.acct, st.days, st.parsedRows);
         // keep the 15 most recent imports undoable
         const old = Object.values(S.items('imports')).sort((a, b) => b.ts - a.ts).slice(14);
-        const items = { [batch]: { id: batch, ts: Date.now(), acct: st.acct, file: st.file || 'bank file', added: add.map((t) => t.id), changed, removed: gone.length ? gone : null, by: myId() } };
+        // when the account was last reconciled before this file, so undoing it can put that back
+        const was = D.accounts[st.acct] || {};
+        const items = { [batch]: { id: batch, ts: Date.now(), acct: st.acct, file: st.file || 'bank file', added: add.map((t) => t.id), changed, removed: gone.length ? gone : null, rec: { at: was.reconciledAt || null, bal: was.reconciledBalance == null ? null : was.reconciledBalance }, by: myId() } };
         old.forEach((b) => (items[b.id] = null));
         guard(S.write('meta', 'imports', { items }));
         closeSheet();
@@ -3197,6 +3199,22 @@
     };
   }
 
+  // Undoing an import the account was reconciled against: the reconcile date goes back to before it, and
+  // anything locked in after that date is unlocked (still cleared), so the next reconcile checks it again.
+  // Imports from before 19 Nov 2026 didn't record the earlier date: then it's the last reconciled day before the file.
+  function importRecBack(b, added, removes, restores) {
+    const a = D.accounts[b.acct], first = added.reduce((m, t) => (!m || t.date < m ? t.date : m), '');
+    if (!a || !a.reconciledAt || !first || a.reconciledAt < first) return null;
+    const gone = new Set(removes.map((t) => t.id)), now = {};
+    D.tx.filter((t) => t.acct === b.acct && !gone.has(t.id)).forEach((t) => (now[t.id] = t));
+    restores.forEach((t) => { if (t.acct === b.acct) now[t.id] = t; });
+    const left = Object.values(now);
+    let at = b.rec ? b.rec.at : left.filter((t) => t.cleared === 'r' && t.date < first).reduce((m, t) => (!m || t.date > m ? t.date : m), '') || null;
+    if (at && at >= a.reconciledAt) return null;
+    const bal = b.rec && b.rec.at === at && b.rec.bal != null ? b.rec.bal : at ? left.filter((t) => t.date <= at).reduce((n, t) => n + t.amt, 0) : null;
+    const unlock = left.filter((t) => t.cleared === 'r' && (!at || t.date > at)).map((t) => Object.assign({}, t, { cleared: 'c' }));
+    return { at, bal, unlock };
+  }
   function openUndoImport(id) {
     const b = S.items('imports')[id];
     if (!b) return;
@@ -3207,6 +3225,7 @@
       title: 'Undo import',
       body: `<p>This removes the <b>${added.length}</b> ${added.length === 1 ? 'transaction' : 'transactions'} added from <b>${esc(b.file)}</b> into ${esc(acctName(b.acct))}${changed.length ? `, and puts the <b>${changed.length}</b> ${changed.length === 1 ? 'transaction' : 'transactions'} it matched or updated back exactly as they were before` : ''}${(b.removed || []).length ? `. The <b>${b.removed.length}</b> released pending ${b.removed.length === 1 ? 'charge it removed comes' : 'charges it removed come'} back too` : ''}.</p>
         ${edited ? `<p class="hint warn">You've changed ${edited} of the added transactions since importing. They'll be removed too.</p>` : ''}
+        ${(() => { const a = D.accounts[b.acct], first = added.reduce((m, t) => (!m || t.date < m ? t.date : m), ''); return a && a.reconciledAt && first && a.reconciledAt >= first ? `<p class="hint">${esc(acctName(b.acct))} was reconciled against this file, so it goes back to how it was reconciled before.</p>` : ''; })()}
         <p class="hint">You can import the file again afterwards.</p>`,
       foot: '<button class="btn danger" data-saction="yes">Undo this import</button><button class="btn" data-saction="no">Cancel</button>',
     });
@@ -3217,9 +3236,14 @@
         for (const t of added) { removes.push(t); if (t.pair && D.txById[t.pair]) removes.push(D.txById[t.pair]); }
         const restores = changed.map((x) => Object.assign({}, D.txById[x], b.changed[x]));
         (b.removed || []).forEach((t) => { if (!D.txById[t.id]) restores.push(t); }); // released holds it removed come back
-        await putTxs(restores, removes);
+        // a reconcile that relied on this file goes too: back to when it was reconciled before
+        const back = importRecBack(b, added, removes, restores);
+        const writes = {};
+        restores.concat(back ? back.unlock : []).forEach((t) => (writes[t.id] = t)); // an unlocked one may also be a restored one
+        await putTxs(Object.values(writes), removes);
+        if (back) await putAcct(Object.assign({}, D.accounts[b.acct], { reconciledAt: back.at, reconciledBalance: back.bal }));
         await guard(S.write('meta', 'imports', { items: { [id]: null } }));
-        closeSheet(); toast(`Import undone: removed ${added.length}${restores.length ? `, restored ${restores.length}` : ''}.`); render();
+        closeSheet(); toast(`Import undone: removed ${added.length}${restores.length ? `, restored ${restores.length}` : ''}.${back ? ` ${back.at ? `Last reconciled is back to ${dateLabel(back.at)}` : 'Not reconciled now'}.` : ''}`); render();
       },
     };
   }
