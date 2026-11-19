@@ -31,6 +31,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-11-19: **Reconcile sorts itself out (Dani).** No extra button: when it's out, YNABB tries the fixes it knows (a bank line in twice, a bank line missing, a typed entry the bank took differently) and makes them itself only when together they match the bank to the cent (10 changes at most). Once it matches, it approves what the bank confirms and finishes. A card says what it did, with **Undo all of this** (takes back only its own steps). It still asks about categories and look-alikes it can't tell apart. If it can't make it match, a **Where It's Out** list shows what's only in YNABB, only at the bank, or a different amount.
 - 2026-11-19: **Reconcile finds where it's out (Dani).** NAB Family was out by $1,296.99 since 26 Oct: the Fitz Farming refund came in twice because NAB reworded it (once as "NPP-…", once as "FITZ FARMING PTY LTD"). Reconcile now checks the saved bank file: when the bank has a line once and YNABB has it twice, and that's exactly how far out it is, it shows under Possible Matches, and Match keeps the reconciled copy. The **Find where it's out** button (lost in the October redesign) is back on the reconcile card: it compares day by day with the bank file and lists what's only in YNABB and only at the bank. It no longer offers to add a bank line that's already in YNABB but not ticked as cleared.
 
 - 2026-10-17: **Docs brought up to date** with the check-over changes (server, architecture, testing, self-hosting, project context).
