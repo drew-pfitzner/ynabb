@@ -31,6 +31,7 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-11-19: **The #add link can fill in the total, shop and date (Dani).** `#add?total=45.20&shop=Kmart&date=2026-11-19` opens New transaction with those already in, so an iPhone Shortcut that asks once (to name the receipt file) doesn't need them typed again.
 - 2026-11-19: **A link straight to a new transaction (Dani).** https://ynabb.tail8c1464.ts.net/#add opens YNABB on Add transaction, for the iPhone Action button (a Shortcut with one "Open URLs" step) or a Home Screen icon. Receipt there can scan with the iPhone's own scanner (Choose File › ⋯ › Scan Documents).
 - 2026-11-19: **Uncategorised split parts show up (Dani).** A split with a part that has no category now appears under the Uncategorized filter and the "needs a category" count, matching the budget page's count (Kmart $80.75 on 24 Oct had an $8 part with none).
 - 2026-11-19: **Undoing an import undoes its reconcile (Dani).** If the account was reconciled against that file, Undo import puts "Last reconciled" back to what it was before the file, and unlocks anything locked in after that date (still cleared), so the next reconcile checks it again. Imports from before today didn't save the earlier date, so for those it uses the last reconciled day before the file.
