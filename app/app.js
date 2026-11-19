@@ -1540,11 +1540,11 @@
   const recWaiting = () => (UI.rec ? D.tx.filter((t) => t.acct === UI.rec.acct && t.date <= recCutoff() && checkOf(t)) : []);
   // reconciled once it matches the bank and everything is approved: no Finish button to remember
   // checked each time the reconcile card is drawn, so any change that settles it (approving, fixing, the balance) finishes it
-  // what's left for a person once it matches: a category, or two look-alikes YNABB can't tell apart
-  const ASK = ['nocat', 'swap', 'fix'];
+  // what's left for a person once it matches: categories (even ones YNABB guessed: Woolies on a trip isn't
+  // groceries), and two look-alikes it can't tell apart. Reconcile finishes once these are approved.
+  const ASK = ['nocat', 'new', 'swap', 'fix'];
   async function recAutoFinish() {
-    // categories can be chosen after: they don't change the balance
-    if (UI.recFinishing || !UI.rec || !D.accounts[UI.rec.acct] || recState().diff || recWaiting().some((t) => checkOf(t)[0] !== 'nocat')) return;
+    if (UI.recFinishing || !UI.rec || !D.accounts[UI.rec.acct] || recState().diff || recWaiting().length) return;
     UI.recFinishing = true;
     try { await recFinish(0); } finally { UI.recFinishing = false; }
   }
@@ -1557,12 +1557,12 @@
   function recCard() {
     const r = UI.rec, { total, diff } = recState(), debt = isDebt(r.acct), waiting = recWaiting();
     if (recAutoDue()) setTimeout(recAuto, 0);
-    else if (!diff && !waiting.some((t) => checkOf(t)[0] !== 'nocat')) setTimeout(recAutoFinish, 0);
+    else if (!diff && !waiting.length) setTimeout(recAutoFinish, 0);
     const show = (v) => money(debt ? -v : v), gap = money(Math.abs(diff));
     const res = diff && !waiting.length ? recDiff() : null;
     const big = diff ? `Out by ${gap}` : waiting.length ? `${waiting.length} to check` : 'Matches &#10003;';
     let sub = diff ? `YNABB has ${gap} ${diff < 0 ? 'more' : 'less'} than the bank.${waiting.length ? ' Check the list below first.' : ''}`
-      : waiting.length ? "The totals match the bank. Approve these and it's reconciled." : '';
+      : waiting.length ? "Matches the bank. Check the categories below and it's reconciled." : '';
     let act = '';
     if (res && !res.start) act = '<button class="btn sm" data-action="rec-flow-import">Import your bank file</button>';
     else if (res && !res.items.length) act = `<button class="linkish rc-adj" data-action="rec-adjust">Can't find it? Add a ${gap} adjustment</button>`;
