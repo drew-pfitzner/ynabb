@@ -416,7 +416,15 @@ button.pill:hover { box-shadow: inset 0 0 0 2px var(--accent); }
 .rc-did { border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; background: var(--surface); }
 .rc-did header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .rc-did ul { margin: 8px 0 12px; padding-left: 20px; line-height: 1.45; }
-.rc-did li + li { margin-top: 4px; }
+.rc-did li + li { margin-top: 6px; }
+.rc-did li .linkish { font-size: 13px; margin-left: 4px; }
+.rc-did-tx { margin: 6px 0 2px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.rc-did-row { display: grid; grid-template-columns: 5.5em 1fr auto; gap: 10px; align-items: center; width: 100%; padding: 6px 10px; border: 0; background: none; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.rc-did-row + .rc-did-row { border-top: 1px solid var(--line); }
+.rc-did-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.rc-did-row .p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-did-row small { display: block; color: var(--muted); font-size: 12px; }
+.rc-did-row b { font-variant-numeric: tabular-nums; }
 /* the checklist while reconciling */
 .ck-sec { margin-bottom: 16px; }
 .ck-q { margin: 0 0 14px; }
@@ -449,7 +457,7 @@ button.pill:hover { box-shadow: inset 0 0 0 2px var(--accent); }
 .ck-c { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ck-c.none { color: color-mix(in srgb, var(--need) 70%, var(--ink)); font-weight: 600; }
 .ck-d { font-size: 13px; font-weight: 600; color: color-mix(in srgb, var(--need) 55%, var(--ink)); }
-.ck-side { display: flex; align-items: center; align-self: stretch; padding: 8px 12px 8px 0; }
+.ck-side { display: flex; align-items: center; gap: 8px; align-self: stretch; padding: 8px 12px 8px 0; }
 .ck-row.open .ck-side { align-self: start; padding-top: 12px; }
 .ck-a { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ck-a.pos { color: var(--good); }
@@ -464,7 +472,9 @@ button.pill:hover { box-shadow: inset 0 0 0 2px var(--accent); }
 .ck-tick.ck-del { background: var(--bad); color: var(--on-bad); }
 .btn.danger svg { width: 14px; height: 14px; vertical-align: -2px; }
 .ck-b { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ck-row.nocat { position: relative; display: block; }
+.ck-row.nocat { display: flex; align-items: stretch; }
+/* the quick category picker covers the row, but not the pencil beside it */
+.ck-pick { position: relative; flex: 1; min-width: 0; }
 .ck-row.nocat .ck-main { padding-right: 14px; }
 .ck-catsel { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .ck-pen { padding: 4px 10px; }

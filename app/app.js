@@ -1706,10 +1706,12 @@
     const cat = catLabel(t);
     const name = esc(t.payee || tidyPayee(t.bank) || 'No payee');
     // a row that needs a category: tap anywhere on it to choose one (the list slides up on a phone)
-    if (k === 'nocat') return `<div class="ck-row nocat" data-row="${t.id}">
+    const pen = `<button class="btn sm ck-pen" data-action="chk-open" data-id="${t.id}" aria-label="Add a note, split it or add a receipt" title="Add a note, split it or add a receipt">${PEN}</button>`;
+    if (k === 'nocat') return `<div class="ck-row nocat" data-row="${t.id}"><div class="ck-pick">
         <div class="ck-main"><span class="ck-l1"><span class="ck-p">${name}</span><span class="ck-a ${t.amt > 0 ? 'pos' : ''}">${txAmt(t.amt)}</span></span>
           <span class="ck-c none">Choose a Category · ${esc(dateLabel(t.date))}</span>${t.bank ? `<span class="ck-b mono">${esc(t.bank)}</span>` : ''}</div>
-        <select class="ck-catsel" data-ck-cat="${t.id}" aria-label="Choose a Category">${catOptions('', { blankLabel: 'Choose a Category', forTx: true, acct: t.acct })}</select>
+        <select class="ck-catsel" data-ck-cat="${t.id}" aria-label="Choose a Category">${catOptions('', { blankLabel: 'Choose a Category', forTx: true, acct: t.acct })}</select></div>
+        <div class="ck-side">${pen}</div>
       </div>`;
     const open = UI.ckOpen === t.id;
     // the amount is said in the line underneath when that's what differs
@@ -1720,7 +1722,7 @@
           <span class="ck-c">${esc(cat || 'Uncategorized')}${k === 'date' ? '' : ` · ${esc(dateLabel(t.date))}`}</span>
           ${k === 'match' || k === 'new' ? '' : `<span class="ck-d">${esc(line)}</span>`}
         </button>
-        <div class="ck-side"><button class="ck-tick" data-action="approve" data-id="${t.id}" aria-label="${esc(CHECK_HINT[k][1] || 'Approve')}" title="${esc(CHECK_HINT[k][1] || 'Approve')}">${ICON.tick}</button></div>
+        <div class="ck-side">${pen}<button class="ck-tick" data-action="approve" data-id="${t.id}" aria-label="${esc(CHECK_HINT[k][1] || 'Approve')}" title="${esc(CHECK_HINT[k][1] || 'Approve')}">${ICON.tick}</button></div>
         ${open ? `<div class="ck-more">${chkCompare(t, k)}<div class="ck-btns">${chkButtons(t, k)}</div></div>` : ''}
       </div>`;
   }
@@ -1971,7 +1973,7 @@
     await putAcct(Object.assign({}, a, { reconciledAt: cut, reconciledBalance: r.bank })); S.newStep();
     // part of what YNABB sorted out on its own, so Undo all takes this back too
     const did = UI.recDone;
-    if (did && did.acct === r.acct && !did.finished) { did.finished = true; did.groups.push(...S.undoStack.slice(mark)); did.lines.push(`Reconciled to ${dateLabel(cut)}: ${money(r.bank)}, the same as the bank.`); }
+    if (did && did.acct === r.acct && !did.finished) { did.finished = true; did.groups.push(...S.undoStack.slice(mark)); did.lines.push({ text: `Reconciled to ${dateLabel(cut)}: ${money(r.bank)}, the same as the bank.`, ids: [] }); }
     UI.recSkip = null;
     UI.rec = null; saveUI();
     UI.only = null; UI.f = Object.assign(NO_FILTERS(), { acct: a.id }); // stay on the account just reconciled
@@ -2009,7 +2011,7 @@
       if (inPair.has(p.a.id) || inPair.has(p.b.id)) continue;
       inPair.add(p.a.id); inPair.add(p.b.id);
       twice.puts.push(carryInto(p.a, p.b)); twice.removes.push(p.b);
-      twice.lines.push(`${nameOf(p.a)} ${signed(p.a.amt)} came in twice (${dateLabel(p.a.date)} and ${dateLabel(p.b.date)}), but the bank paid it once. Kept one.`);
+      twice.lines.push({ text: `${nameOf(p.a)} ${signed(p.a.amt)} came in twice (${dateLabel(p.a.date)} and ${dateLabel(p.b.date)}), but the bank paid it once. Kept one.`, ids: [p.a.id] });
     }
     // 2. entries typed by hand that line up with the bank's lines, or that the bank never had
     const typed = { puts: [], removes: [], lines: [] };
@@ -2018,14 +2020,15 @@
       const p = recFixPlan(it), [t] = it.ts, b = it.bs[0];
       if (!p) continue;
       typed.puts.push(...p.puts); typed.removes.push(...p.removes);
-      typed.lines.push({
+      const kept = p.puts.map((x) => x.id);
+      typed.lines.push({ ids: kept, text: {
         same: `${nameOf(t)} ${signed(t.amt)}: your entry and the bank's line were the same purchase. Kept one, with your details.`,
         amount: `${nameOf(t)}: you entered ${money(Math.abs(t.amt))}, the bank took ${money(Math.abs(b && b.amt))}. Used the bank's.`,
         transfer: `Transfer ${nameOf(t)}: you entered ${money(Math.abs(t.amt))}, the bank moved ${money(Math.abs(b && b.amt))}. Used the bank's.`,
         parts: `${nameOf(t)} ${signed(t.amt)}: the bank took it in ${it.bs.length} parts. Matched them.`,
         joined: `${it.ts.map(nameOf).join(' + ')}: the bank took them in one payment. Matched them.`,
         extra: `Removed ${nameOf(t)} ${signed(t.amt)} on ${dateLabel(t.date)}: entered by hand, but the bank never had it.`,
-      }[it.kind] || `${nameOf(t)}: matched to the bank.`);
+      }[it.kind] || `${nameOf(t)}: matched to the bank.` });
     }
     // 3. the day-by-day check against the bank file: copies the bank had once, and its lines YNABB is missing
     const file = (() => {
@@ -2038,12 +2041,12 @@
           if (!o || o.amt !== t.amt) return null;
           const [k, d] = t.cleared === 'r' && o.cleared !== 'r' ? [t, o] : [o, t]; // the reconciled copy stays
           ups[k.id] = carryInto(ups[k.id] || k, d); removes.push(d);
-          lines.push(`${nameOf(t)} ${signed(t.amt)} was in twice (${dateLabel(t.date)} and ${dateLabel(o.date)}), but the bank has it once. Kept one.`);
+          lines.push({ text: `${nameOf(t)} ${signed(t.amt)} was in twice (${dateLabel(t.date)} and ${dateLabel(o.date)}), but the bank has it once. Kept one.`, ids: [k.id] });
         }
         for (const x of p.theirs) {
           const rule = ruleFor(x.desc, x.amt, acct, x.d);
           const n = { id: S.uid(), acct, date: x.d, amt: x.amt, bank: x.desc, payee: rule && rule.payee ? rule.payee : tidyPayee(x.desc), cat: rule ? rule.cat || null : null, memo: rule && rule.memo ? rule.memo : null, cleared: 'c', approved: false, by: myId() };
-          adds.push(n); lines.push(`Added ${n.payee} ${signed(n.amt)} on ${dateLabel(n.date)}: the bank has it, YNABB didn't.`);
+          adds.push(n); lines.push({ text: `Added ${n.payee} ${signed(n.amt)} on ${dateLabel(n.date)}: the bank has it, YNABB didn't.`, ids: [n.id] });
         }
       }
       return { puts: adds.concat(Object.values(ups)), removes, lines };
@@ -2055,6 +2058,7 @@
   async function recAuto() {
     const r = UI.rec;
     if (!recAutoDue()) return;
+    UI.recDoneOpen = null;
     UI.recBusy = true;
     const done = UI.recDone && UI.recDone.acct === r.acct && !UI.recDone.finished ? UI.recDone : { acct: r.acct, lines: [], groups: [] };
     const mark = S.undoStack.length;
@@ -2070,14 +2074,14 @@
         const ok = recWaiting().filter((t) => !ASK.includes(checkOf(t)[0]));
         if (ok.length) {
           const kinds = {};
-          ok.forEach((t) => { const k = checkOf(t)[0]; kinds[k] = (kinds[k] || 0) + 1; });
+          ok.forEach((t) => { const k = checkOf(t)[0]; (kinds[k] = kinds[k] || []).push(t.id); });
           S.newStep(); await putTxs(ok.map((t) => Object.assign({}, t, { approved: null, match: null }))); S.newStep();
           const say = (k, n) => {
             const l = n === 1 ? 'line' : 'lines';
             return { new: `${n} new bank ${l}, categorised from your past choices`, match: `${n} bank ${l} that matched what you entered exactly`, update: `${n} pending ${n === 1 ? 'purchase that has' : 'purchases that have'} gone through`,
               date: `${n} bank ${l} matched to what you entered, using the bank's date`, amount: `${n} bank ${l} matched to what you entered, using the bank's amount` }[k] || `${n} bank ${l} matched to what you entered`;
           };
-          Object.keys(kinds).forEach((k) => done.lines.push(`Approved ${say(k, kinds[k])}.`));
+          Object.keys(kinds).forEach((k) => done.lines.push({ text: `Approved ${say(k, kinds[k].length)}.`, ids: kinds[k] }));
         }
       }
       // the exact undo steps it made, so Undo all takes back only those
@@ -2092,7 +2096,12 @@
     const d = UI.recDone;
     if (!d || !D.accounts[d.acct] || !d.lines.length) return '';
     return `<div class="rc-did"><header><b>What YNABB sorted out in ${esc(acctName(d.acct))}</b><button class="rb-x" data-action="rec-done-x" aria-label="Close" title="Close">&times;</button></header>
-      <ul>${d.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+      <ul>${d.lines.map((l, i) => {
+        const ts = (l.ids || []).map((id) => D.txById[id]).filter(Boolean), open = ts.length <= 5 || (UI.recDoneOpen || {})[i];
+        const list = ts.length && open ? `<div class="rc-did-tx">${ts.map((t) => `<button class="rc-did-row" data-action="chk-open" data-id="${t.id}" title="Open it"><span>${esc(dateLabel(t.date))}</span><span class="p">${esc(nameOf(t))}<small>${esc(catLabel(t) || 'Uncategorized')}</small></span><b class="${t.amt > 0 ? 'pos' : ''}">${txAmt(t.amt)}</b></button>`).join('')}</div>` : '';
+        const more = ts.length > 5 ? `<button class="linkish" data-action="rec-done-show" data-i="${i}">${open ? 'Hide them' : `Show these ${ts.length}`}</button>` : '';
+        return `<li>${esc(l.text)} ${more}${list}</li>`;
+      }).join('')}</ul>
       <button class="btn sm" data-action="rec-done-undo">Undo all of this</button></div>`;
   }
   async function recDoneUndo() {
@@ -4286,7 +4295,8 @@
     'clear-only': () => { UI.only = null; render(); },
     'acct-pick': (el) => { if (UI.bc) UI.bc = el.dataset.id ? { acct: el.dataset.id, step: null } : null; UI.f = Object.assign({}, UI.f, { acct: el.dataset.id, from: UI.bc ? bcSince(el.dataset.id) : UI.f.from, to: UI.bc ? '' : UI.f.to }); UI.only = null; UI.limit = 150; UI.editTx = null; UI.sel = null; saveUI(); render(); },
     'tx-sort': (el) => { const k = el.dataset.k; UI.sort = UI.sort.k === k ? { k, dir: -UI.sort.dir } : { k, dir: k === 'date' || k === 'amt' ? -1 : 1 }; render(); },
-    'rec-done-x': () => { UI.recDone = null; render(); },
+    'rec-done-x': () => { UI.recDone = null; UI.recDoneOpen = null; render(); },
+    'rec-done-show': (el) => { UI.recDoneOpen = Object.assign({}, UI.recDoneOpen, { [el.dataset.i]: !(UI.recDoneOpen || {})[el.dataset.i] }); render(); },
     'rec-done-undo': () => recDoneUndo(),
     'bank-check': () => { const a = UI.rec && UI.rec.acct; UI.rec = null; openBankCheck(a); },
     'bc-close': () => { if (UI.bc && UI.bc.find != null) UI.q = ''; UI.bc = null; UI.f.from = ''; UI.f.to = ''; render(); },
