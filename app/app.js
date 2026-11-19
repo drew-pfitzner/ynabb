@@ -1371,6 +1371,15 @@
     const byAmt = {};
     D.tx.forEach((t) => { if (t.acct === acct) (byAmt[t.amt] = byAmt[t.amt] || []).push(t); });
     const out = [], twice = [];
+    // the bank's own saved lines: when the bank file has an amount fewer times than YNABB does around those days,
+    // one copy is extra, however differently NAB worded it the second time ("NPP-…" one week, the payer's name the next)
+    const brows = outBy ? ((S.items('bankrows')[acct] || {}).rows || []).map((x) => { const [d, a] = x.split('|'); return { d, amt: Number(a) }; }) : [];
+    const fileOnce = (x, y) => {
+      const lo = shiftDay(x.date < y.date ? x.date : y.date, -5), hi = shiftDay(x.date > y.date ? x.date : y.date, 5);
+      if (!brows.length || brows[0].d > lo || brows[brows.length - 1].d < hi) return false; // the file doesn't cover those days
+      const n = (l, f) => l.filter((r) => r.amt === x.amt && f(r) >= lo && f(r) <= hi).length;
+      return n(brows, (r) => r.d) < n(byAmt[x.amt], (t) => t.date);
+    };
     for (const k in byAmt) {
       const g = byAmt[k];
       if (g.length < 2) continue;
@@ -1380,6 +1389,12 @@
         if (both && !outBy) continue; // two lines from the bank are two real transactions
         if (x.pair && y.pair) continue;
         if ((x.notWith || []).includes(y.id) || (y.notWith || []).includes(x.id)) continue;
+        if (both && dayGap(x.date, y.date) <= 5 && !(x.cleared === 'r' && y.cleared === 'r') && fileOnce(x, y)) {
+          // keep the reconciled copy, so what was locked in stays as it was
+          const [a, b] = y.cleared === 'r' && x.cleared !== 'r' ? [y, x] : [x, y];
+          twice.push({ a, b, both, once: true, gap: dayGap(x.date, y.date), day: null });
+          continue;
+        }
         const dx = descDate(x), dy = descDate(y);
         if (dx && dy && dayGap(dx, dy) > 1) continue; // their bank text names different days (a day apart is allowed: pending and final lines can differ)
         const exact = !!(dx && dx === dy), same = !!(dx && dy && dayGap(dx, dy) <= 1);
@@ -1547,6 +1562,8 @@
     let act = '';
     if (res && !res.start) act = '<button class="btn sm" data-action="rec-flow-import">Import your bank file</button>';
     else if (res && !res.items.length) act = `<button class="linkish rc-adj" data-action="rec-adjust">Can't find it? Add a ${gap} adjustment</button>`;
+    // the day-by-day check against the bank file: shows the day it stopped matching, and which lines differ
+    if (diff && Object.keys(S.items('bankbal')[r.acct] || {}).length) act = `<button class="btn sm" data-action="bank-check">Find where it's out</button>${act ? ' ' + act : ''}`;
     return `<div class="rc ${diff ? 'off' : waiting.length ? 'wait' : 'ok'}">
         <div class="rc-top"><span>Reconciling <b>${esc(acctName(r.acct))}</b></span><button class="rb-x" data-action="rec-stop" aria-label="Stop reconciling" title="Stop reconciling">&times;</button></div>
         <div class="rc-big">${big}</div>
@@ -1692,7 +1709,8 @@
     const xf = xferPair(p.a, p.b), name = esc((xf && xf[1].payee) || p.a.payee || p.b.payee || tidyPayee(p.a.bank || p.b.bank) || 'No payee');
     const who = (t) => (t.ik ? 'Bank' : 'Manual'), when = `${who(p.b)} ${dateLabel(p.b.date)} → ${who(p.a)} ${dateLabel(p.a.date)}`;
     const half = (t) => `<div class="ck-cr"><span class="ck-cl">${t.ik ? 'Bank' : 'Manual'}</span><span class="ck-cn">${esc(t.payee || 'No payee')} · ${esc(catLabel(t) || 'Uncategorized')}${t.memo ? ` · <i>${esc(t.memo)}</i>` : ''}<small>${esc(dateLabel(t.date))}${t.cleared === 'r' ? ' · reconciled' : ''}</small>${t.bank ? `<small class="mono">${esc(t.bank)}</small>` : ''}</span><b>${esc(money(Math.abs(t.amt)))}</b></div>`;
-    const why = p.both ? `Both came from bank files ${p.day ? `and say ${dateLabel(p.day)}` : 'with the same words'}, and that explains how far out it is: the bank sent the same line twice.`
+    const why = p.once ? `Your bank file has this only once, but YNABB has it twice, and that's exactly how far out it is. The bank worded it differently the second time, so it came in again.`
+      : p.both ? `Both came from bank files ${p.day ? `and say ${dateLabel(p.day)}` : 'with the same words'}, and that explains how far out it is: the bank sent the same line twice.`
       : p.exact ? `Both bank descriptions say ${dateLabel(p.day)}.` : p.same ? "The bank descriptions are a day apart. That happens when a pending line becomes the final one." : '';
     const keep = `<button class="btn sm" data-action="dbl-not" data-a="${p.a.id}" data-b="${p.b.id}">Not the Same</button>`;
     return `<div class="ck-row${open ? ' open' : ''}">
@@ -3160,8 +3178,27 @@
     const firstDate = D.tx.reduce((m, t) => (t.acct === acct && (!m || t.date < m) ? t.date : m), '');
     const dates = Object.keys(bank).filter((d) => firstDate && d >= firstDate).sort();
     if (!dates.length) return null;
-    // only what the bank can see: not uncleared entries, not pending card holds
-    const txs = D.tx.filter((t) => t.acct === acct && t.cleared !== 'u' && !isHold(t)).map((t) => ({ t, d: bankDate(t) })).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+    // line by line first: pair each bank line with a YNABB transaction of the same amount within 10 days.
+    // An entry not ticked as cleared still counts once the bank has it, so it isn't offered again as missing.
+    const all = D.tx.filter((t) => t.acct === acct && !isHold(t)).map((t) => ({ t, d: bankDate(t) })).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+    const brows = ((S.items('bankrows')[acct] || {}).rows || []).map((x) => { const [d, a, ...r] = x.split('|'); return { d, amt: Number(a), desc: r.join(' ') }; }).filter((r) => r.d >= dates[0]);
+    let onlyBank = [], onlyOurs = [];
+    const used = new Set();
+    if (brows.length) {
+      const byAmt = {};
+      // a purchase can be dated here up to 10 days before the bank takes it, so those can still pair with the file's first lines
+      const lo = shiftDay(brows[0].d, -10);
+      all.forEach((x) => { if (x.d >= lo && x.d <= brows[brows.length - 1].d) (byAmt[x.t.amt] = byAmt[x.t.amt] || []).push(x); });
+      for (const r of brows) {
+        // the copy imported from the bank wins over one entered by hand, a cleared one over one that isn't, then the closest date
+        let best = null, bs = 1e9;
+        for (const x of byAmt[r.amt] || []) { if (used.has(x.t.id)) continue; const g = dayGap(x.d, r.d), sc = g + (x.t.ik ? 0 : 20) + (x.t.cleared === 'u' ? 40 : 0); if (g <= 10 && sc < bs) { best = x; bs = sc; } }
+        if (best) used.add(best.t.id); else onlyBank.push(r);
+      }
+      onlyOurs = Object.values(byAmt).flat().filter((x) => !used.has(x.t.id) && x.t.cleared !== 'u' && x.d >= brows[0].d);
+    }
+    // only what the bank can see: not uncleared entries (unless the bank has them), not pending card holds
+    const txs = all.filter((x) => x.t.cleared !== 'u' || used.has(x.t.id));
     let i = 0, run = 0;
     const days = dates.map((d) => { while (i < txs.length && txs[i].d <= d) run += txs[i++].t.amt; return { d, bank: bank[d], ours: run, diff: run - bank[d] }; });
     const dayOf = {}; days.forEach((x) => (dayOf[x.d] = x));
@@ -3182,21 +3219,6 @@
     if (z > 0) stable.splice(0, z);
     const upto = matchedUntil ? txs.filter((x) => x.d <= matchedUntil) : [];
     const lastTx = upto.length ? upto[upto.length - 1].t : null;
-    // line by line: pair each bank line with a YNABB transaction of the same amount within 10 days
-    const brows = ((S.items('bankrows')[acct] || {}).rows || []).map((x) => { const [d, a, ...r] = x.split('|'); return { d, amt: Number(a), desc: r.join(' ') }; }).filter((r) => r.d >= dates[0]);
-    let onlyBank = [], onlyOurs = [];
-    if (brows.length) {
-      const byAmt = {};
-      txs.forEach((x) => { if (x.d >= brows[0].d && x.d <= brows[brows.length - 1].d) (byAmt[x.t.amt] = byAmt[x.t.amt] || []).push(x); });
-      const used = new Set();
-      for (const r of brows) {
-        // the copy imported from the bank wins over one entered by hand, then the closest date
-        let best = null, bs = 1e9;
-        for (const x of byAmt[r.amt] || []) { if (used.has(x.t.id)) continue; const g = dayGap(x.d, r.d), sc = g + (x.t.ik ? 0 : 20); if (g <= 10 && sc < bs) { best = x; bs = sc; } }
-        if (best) used.add(best.t.id); else onlyBank.push(r);
-      }
-      onlyOurs = Object.values(byAmt).flat().filter((x) => !used.has(x.t.id));
-    }
     const shop = (s) => String(s || '').toLowerCase().replace(/[^a-z ]/g, ' ').trim().split(/\s+/)[0] || '';
     const steps = [];
     if (stable.length && stable[0].diff) steps.push({ before: true, from: null, to: stable[0].start, change: stable[0].diff });
@@ -3208,7 +3230,7 @@
       p.a = dayOf[p.from]; p.b = dayOf[p.to];
       p.txs = txs.filter((x) => x.d > p.from && x.d <= p.to).map((x) => x.t);
       if (brows.length) {
-        const ours = onlyOurs.filter((x) => x.d > p.from && x.d <= p.to).map((x) => x.t), theirs = onlyBank.filter((r) => r.d > p.from && r.d <= p.to);
+        const ours = onlyOurs.filter((x) => x.d > p.lo && x.d <= p.to).map((x) => x.t), theirs = onlyBank.filter((r) => r.d > p.from && r.d <= p.to);
         // the same shopping with a different amount here and at the bank
         p.differ = [];
         for (const t of ours.slice()) {

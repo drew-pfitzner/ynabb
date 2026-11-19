@@ -31,6 +31,8 @@ How this works: ask Claude to "add X to the todo list", or edit this file. When 
 
 ## Done
 
+- 2026-11-19: **Reconcile finds where it's out (Dani).** NAB Family was out by $1,296.99 since 26 Oct: the Fitz Farming refund came in twice because NAB reworded it (once as "NPP-…", once as "FITZ FARMING PTY LTD"). Reconcile now checks the saved bank file: when the bank has a line once and YNABB has it twice, and that's exactly how far out it is, it shows under Possible Matches, and Match keeps the reconciled copy. The **Find where it's out** button (lost in the October redesign) is back on the reconcile card: it compares day by day with the bank file and lists what's only in YNABB and only at the bank. It no longer offers to add a bank line that's already in YNABB but not ticked as cleared.
+
 - 2026-10-17: **Docs brought up to date** with the check-over changes (server, architecture, testing, self-hosting, project context).
 - 2026-10-17: **Dani got set up** with `docs/GETTING-STARTED.md` (ticked off in Now).
 - 2026-10-17: **Put the budget back to an earlier time (Drew).** In Settings, under Recent imports: pick a time and press **See what changes** to compare then and now (transactions, total, accounts, categories, and who changed things since), then put it back. The little **?** explains it. Either of you can use it on your own budget. YNABB rebuilds the budget from its log of every change, and refuses if that log can't fully explain the budget as it is now. A copy of the current budget is kept first (Settings › Budget before the last put back).
