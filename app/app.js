@@ -1540,8 +1540,11 @@
   const recWaiting = () => (UI.rec ? D.tx.filter((t) => t.acct === UI.rec.acct && t.date <= recCutoff() && checkOf(t)) : []);
   // reconciled once it matches the bank and everything is approved: no Finish button to remember
   // checked each time the reconcile card is drawn, so any change that settles it (approving, fixing, the balance) finishes it
+  // what's left for a person once it matches: a category, or two look-alikes YNABB can't tell apart
+  const ASK = ['nocat', 'swap', 'fix'];
   async function recAutoFinish() {
-    if (UI.recFinishing || !UI.rec || !D.accounts[UI.rec.acct] || recState().diff || recWaiting().length) return;
+    // categories can be chosen after: they don't change the balance
+    if (UI.recFinishing || !UI.rec || !D.accounts[UI.rec.acct] || recState().diff || recWaiting().some((t) => checkOf(t)[0] !== 'nocat')) return;
     UI.recFinishing = true;
     try { await recFinish(0); } finally { UI.recFinishing = false; }
   }
@@ -1553,7 +1556,8 @@
   // While reconciling, the page is just this: a coloured card with one message, then a checklist of what's waiting.
   function recCard() {
     const r = UI.rec, { total, diff } = recState(), debt = isDebt(r.acct), waiting = recWaiting();
-    if (!diff && !waiting.length) setTimeout(recAutoFinish, 0);
+    if (recAutoDue()) setTimeout(recAuto, 0);
+    else if (!diff && !waiting.some((t) => checkOf(t)[0] !== 'nocat')) setTimeout(recAutoFinish, 0);
     const show = (v) => money(debt ? -v : v), gap = money(Math.abs(diff));
     const res = diff && !waiting.length ? recDiff() : null;
     const big = diff ? `Out by ${gap}` : waiting.length ? `${waiting.length} to check` : 'Matches &#10003;';
@@ -1562,8 +1566,6 @@
     let act = '';
     if (res && !res.start) act = '<button class="btn sm" data-action="rec-flow-import">Import your bank file</button>';
     else if (res && !res.items.length) act = `<button class="linkish rc-adj" data-action="rec-adjust">Can't find it? Add a ${gap} adjustment</button>`;
-    // the day-by-day check against the bank file: shows the day it stopped matching, and which lines differ
-    if (diff && Object.keys(S.items('bankbal')[r.acct] || {}).length) act = `<button class="btn sm" data-action="bank-check">Find where it's out</button>${act ? ' ' + act : ''}`;
     return `<div class="rc ${diff ? 'off' : waiting.length ? 'wait' : 'ok'}">
         <div class="rc-top"><span>Reconciling <b>${esc(acctName(r.acct))}</b></span><button class="rb-x" data-action="rec-stop" aria-label="Stop reconciling" title="Stop reconciling">&times;</button></div>
         <div class="rc-big">${big}</div>
@@ -1606,8 +1608,10 @@
     const gone = extraFit(items);
     const pairs = out ? recPairs(UI.rec.acct, recState().diff).filter((p) => !inItem.has(p.a.id) && !inItem.has(p.b.id)) : [];
     const inPair = new Set(pairs.flatMap((p) => [p.a.id, p.b.id]));
+    // still out after everything above: where the bank file and YNABB part ways, line by line, no button needed
+    const where = out ? recWhere(new Set([...inItem, ...inPair])) : { html: '', ids: new Set() };
     // a waiting row that's part of one of those sits only there, till it's sorted, so nothing shows twice
-    recWaiting().filter((t) => !inPair.has(t.id) && !inItem.has(t.id)).forEach((t) => (groups[checkOf(t)[0]] = groups[checkOf(t)[0]] || []).push(t));
+    recWaiting().filter((t) => !inPair.has(t.id) && !inItem.has(t.id) && !where.ids.has(t.id)).forEach((t) => (groups[checkOf(t)[0]] = groups[checkOf(t)[0]] || []).push(t));
     const sec = (k) => {
       const l = k === 'double' ? pairs : (groups[k] || []).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
       const ri = (ritems[k] || []).sort((a, b) => (gone.mark && gone.mark.has(b) ? 1 : 0) - (gone.mark && gone.mark.has(a) ? 1 : 0)), n = l.length + ri.length;
@@ -1621,7 +1625,25 @@
         ${info ? `<p class="ck-hint">${CHECK_HINT[k].filter(Boolean).map(esc).join('<br>')}</p>` : ''}${k === 'extra' ? gone.html : ''}${body}</section>`;
     };
     const search = !UI.ckFind ? `<button class="linkish ck-findlink" data-action="ck-find">${ICON.search} Search past transactions</button>` : `<div class="search ck-q"><span aria-hidden="true">${ICON.search}</span><input id="ckq" type="search" data-live="0" placeholder="Search past transactions" value="${esc(UI.ckQ || '')}" aria-label="Search past transactions" autocomplete="off" enterkeyhint="search"></div>${pastSearch()}`;
-    return recCard() + search + `<div class="ck">${CHECK_ORDER.map(sec).join('')}</div>`;
+    return recCard() + recDoneCard() + search + `<div class="ck">${where.html}${CHECK_ORDER.map(sec).join('')}</div>`;
+  }
+  // from the day-by-day check against the bank file: what's only in YNABB, only at the bank, or a different amount
+  function recWhere(skip) {
+    const res = balanceCheck(UI.rec.acct);
+    const ids = new Set();
+    if (!res || !res.steps.length) return { html: '', ids };
+    const row = (name, amt, date, what, btn) => `<div class="ck-row"><div class="ck-main"><span class="ck-l1"><span class="ck-p">${esc(name)}</span><span class="ck-a ${amt > 0 ? 'pos' : ''}">${txAmt(amt)}</span></span><span class="ck-c">${esc(dateLabel(date))}</span><span class="ck-d">${esc(what)}</span></div><div class="ck-side">${btn}</div></div>`;
+    const open = (t) => `<button class="btn sm ck-pen" data-action="chk-open" data-id="${t.id}" aria-label="Open it" title="Open it">${PEN}</button>`;
+    let rows = '', notes = '';
+    for (const p of res.steps) {
+      if (p.before) { notes += `<p class="ck-hint">It was already out by ${esc(money(Math.abs(p.change)))} on ${esc(dateLabel(p.to))}, the first day of the bank files YNABB has. Import a bank file that goes back further.</p>`; continue; }
+      (p.ours || []).filter((t) => !skip.has(t.id)).forEach((t) => ids.add(t.id) && (rows += row(nameOf(t), t.amt, t.date, 'In YNABB, but not at the bank', open(t))));
+      (p.theirs || []).forEach((x) => (rows += row(tidyPayee(x.desc), x.amt, x.d, 'At the bank, missing from YNABB', `<button class="btn sm" data-action="bc-add" data-d="${x.d}" data-amt="${x.amt}" data-desc="${esc(x.desc)}">Add</button>`)));
+      (p.differ || []).filter(({ t }) => !skip.has(t.id)).forEach(({ t, r }) => ids.add(t.id) && (rows += row(nameOf(t), t.amt, t.date, `The bank says ${signed(r.amt)}`, open(t))));
+      if (!p.explained) notes += `<p class="ck-hint">Between ${esc(dateLabel(p.from))} and ${esc(dateLabel(p.to))} it went ${esc(money(Math.abs(p.change)))} out${rows ? ", and these don't explain all of it" : ''}. Something there is probably dated differently to the bank. Compare those days with your statement.</p>`;
+    }
+    if (!rows && !notes) return { html: '', ids };
+    return { ids, html: `<section class="ck-sec"><header class="ck-h"><b>Where It's Out</b></header>${notes}${rows ? `<div class="ck-list">${rows}</div>` : ''}</section>` };
   }
   // two matches with the same amount and close dates: shown as a pair, right way round or swapped
   const swapPartner = (t, l) => l.find((o) => o !== t && o.amt === t.amt && gapDays(o.date, t.date) <= 10);
@@ -1944,12 +1966,146 @@
     const cut = recCutoff();
     const list = D.tx.filter((t) => t.acct === r.acct && t.cleared !== 'r' && t.date <= cut).map((t) => Object.assign({}, t, { cleared: 'r' }));
     if (adjust) list.push({ id: S.uid(), acct: r.acct, date: cut, payee: 'Reconciliation adjustment', cat: INCOME, amt: adjust, cleared: 'r', memo: 'Added to make the balance match the bank', by: myId() });
+    const mark = S.undoStack.length;
     S.newStep(); await putTxs(list); S.newStep();
-    await putAcct(Object.assign({}, a, { reconciledAt: cut, reconciledBalance: r.bank }));
+    await putAcct(Object.assign({}, a, { reconciledAt: cut, reconciledBalance: r.bank })); S.newStep();
+    // part of what YNABB sorted out on its own, so Undo all takes this back too
+    const did = UI.recDone;
+    if (did && did.acct === r.acct && !did.finished) { did.finished = true; did.groups.push(...S.undoStack.slice(mark)); did.lines.push(`Reconciled to ${dateLabel(cut)}: ${money(r.bank)}, the same as the bank.`); }
     UI.recSkip = null;
     UI.rec = null; saveUI();
     UI.only = null; UI.f = Object.assign(NO_FILTERS(), { acct: a.id }); // stay on the account just reconciled
     toast(`${a.name} is reconciled ✓`); render();
+  }
+  // ---------- reconcile sorts itself out ----------
+  // When it's out, YNABB tries the fixes it knows (a bank line in twice, a bank line missing, a typed entry the bank
+  // took differently) and makes them only when together they make it match the bank to the cent. Once it matches,
+  // it approves what the bank confirms. Each is one ⌘Z step, and the card above the list says what it did.
+  // It still asks about categories, and two look-alikes it can't tell apart.
+  const recAutoDue = () => {
+    const r = UI.rec;
+    if (!r || UI.recBusy || (UI.recNoAuto || {})[r.acct]) return false;
+    return recState().diff ? !r.autoFix : !r.autoOk && recWaiting().some((t) => !ASK.includes(checkOf(t)[0]));
+  };
+  const nameOf = (t) => t.payee || tidyPayee(t.bank) || 'No payee';
+  function recAutoPlan() {
+    const r = UI.rec, acct = r.acct, cut = recCutoff(), { diff } = recState();
+    if (!diff) return null;
+    // does this set of changes make YNABB's total the bank's, to the cent?
+    const closes = (p) => {
+      const gone = new Set(p.removes.concat(p.puts).map((t) => t.id));
+      const total = D.tx.filter((t) => t.acct === acct && t.date <= cut && !gone.has(t.id)).concat(p.puts.filter((t) => t.acct === acct && t.date <= cut)).reduce((s, t) => s + t.amt, 0);
+      return total === r.bank;
+    };
+    const join = (...ps) => {
+      const out = { puts: [], removes: [], lines: [] }, seen = new Set();
+      for (const p of ps) for (const t of p.puts.concat(p.removes)) { if (seen.has(t.id)) return null; seen.add(t.id); }
+      ps.forEach((p) => { out.puts.push(...p.puts); out.removes.push(...p.removes); out.lines.push(...p.lines); });
+      return out;
+    };
+    // 1. the same bank line in twice (the bank file has it once): keep the reconciled copy
+    const twice = { puts: [], removes: [], lines: [] }, inPair = new Set();
+    for (const p of recPairs(acct, diff).filter((p) => p.both && !p.a.pair && !p.b.pair)) {
+      if (inPair.has(p.a.id) || inPair.has(p.b.id)) continue;
+      inPair.add(p.a.id); inPair.add(p.b.id);
+      twice.puts.push(carryInto(p.a, p.b)); twice.removes.push(p.b);
+      twice.lines.push(`${nameOf(p.a)} ${signed(p.a.amt)} came in twice (${dateLabel(p.a.date)} and ${dateLabel(p.b.date)}), but the bank paid it once. Kept one.`);
+    }
+    // 2. entries typed by hand that line up with the bank's lines, or that the bank never had
+    const typed = { puts: [], removes: [], lines: [] };
+    for (const it of recDiff().items) {
+      if (it.kind === 'hold' || it.kind === 'edited') continue;
+      const p = recFixPlan(it), [t] = it.ts, b = it.bs[0];
+      if (!p) continue;
+      typed.puts.push(...p.puts); typed.removes.push(...p.removes);
+      typed.lines.push({
+        same: `${nameOf(t)} ${signed(t.amt)}: your entry and the bank's line were the same purchase. Kept one, with your details.`,
+        amount: `${nameOf(t)}: you entered ${money(Math.abs(t.amt))}, the bank took ${money(Math.abs(b && b.amt))}. Used the bank's.`,
+        transfer: `Transfer ${nameOf(t)}: you entered ${money(Math.abs(t.amt))}, the bank moved ${money(Math.abs(b && b.amt))}. Used the bank's.`,
+        parts: `${nameOf(t)} ${signed(t.amt)}: the bank took it in ${it.bs.length} parts. Matched them.`,
+        joined: `${it.ts.map(nameOf).join(' + ')}: the bank took them in one payment. Matched them.`,
+        extra: `Removed ${nameOf(t)} ${signed(t.amt)} on ${dateLabel(t.date)}: entered by hand, but the bank never had it.`,
+      }[it.kind] || `${nameOf(t)}: matched to the bank.`);
+    }
+    // 3. the day-by-day check against the bank file: copies the bank had once, and its lines YNABB is missing
+    const file = (() => {
+      const res = balanceCheck(acct);
+      if (!res || !res.hasRows || !res.steps.length || !res.steps.every((p) => !p.before && p.explained && !p.differ.length)) return null;
+      const ups = {}, removes = [], adds = [], lines = [];
+      for (const p of res.steps) {
+        for (const t of p.ours) {
+          const o = bcKeeper(t, res);
+          if (!o || o.amt !== t.amt) return null;
+          const [k, d] = t.cleared === 'r' && o.cleared !== 'r' ? [t, o] : [o, t]; // the reconciled copy stays
+          ups[k.id] = carryInto(ups[k.id] || k, d); removes.push(d);
+          lines.push(`${nameOf(t)} ${signed(t.amt)} was in twice (${dateLabel(t.date)} and ${dateLabel(o.date)}), but the bank has it once. Kept one.`);
+        }
+        for (const x of p.theirs) {
+          const rule = ruleFor(x.desc, x.amt, acct, x.d);
+          const n = { id: S.uid(), acct, date: x.d, amt: x.amt, bank: x.desc, payee: rule && rule.payee ? rule.payee : tidyPayee(x.desc), cat: rule ? rule.cat || null : null, memo: rule && rule.memo ? rule.memo : null, cleared: 'c', approved: false, by: myId() };
+          adds.push(n); lines.push(`Added ${n.payee} ${signed(n.amt)} on ${dateLabel(n.date)}: the bank has it, YNABB didn't.`);
+        }
+      }
+      return { puts: adds.concat(Object.values(ups)), removes, lines };
+    })();
+    // the first that matches the bank exactly, and isn't a big sweep
+    for (const p of [twice, typed, join(twice, typed), file]) if (p && p.lines.length && p.lines.length <= 10 && closes(p)) return p;
+    return null;
+  }
+  async function recAuto() {
+    const r = UI.rec;
+    if (!recAutoDue()) return;
+    UI.recBusy = true;
+    const done = UI.recDone && UI.recDone.acct === r.acct && !UI.recDone.finished ? UI.recDone : { acct: r.acct, lines: [], groups: [] };
+    const mark = S.undoStack.length;
+    try {
+      if (recState().diff) {
+        r.autoFix = true;
+        const p = recAutoPlan();
+        if (p) { S.newStep(); await putTxs(p.puts, p.removes); S.newStep(); done.lines.push(...p.lines); }
+      }
+      // it matches: what the bank confirms is approved; categories and look-alikes wait for you
+      if (!recState().diff && !r.autoOk) {
+        r.autoOk = true;
+        const ok = recWaiting().filter((t) => !ASK.includes(checkOf(t)[0]));
+        if (ok.length) {
+          const kinds = {};
+          ok.forEach((t) => { const k = checkOf(t)[0]; kinds[k] = (kinds[k] || 0) + 1; });
+          S.newStep(); await putTxs(ok.map((t) => Object.assign({}, t, { approved: null, match: null }))); S.newStep();
+          const say = (k, n) => {
+            const l = n === 1 ? 'line' : 'lines';
+            return { new: `${n} new bank ${l}, categorised from your past choices`, match: `${n} bank ${l} that matched what you entered exactly`, update: `${n} pending ${n === 1 ? 'purchase that has' : 'purchases that have'} gone through`,
+              date: `${n} bank ${l} matched to what you entered, using the bank's date`, amount: `${n} bank ${l} matched to what you entered, using the bank's amount` }[k] || `${n} bank ${l} matched to what you entered`;
+          };
+          Object.keys(kinds).forEach((k) => done.lines.push(`Approved ${say(k, kinds[k])}.`));
+        }
+      }
+      // the exact undo steps it made, so Undo all takes back only those
+      done.groups.push(...S.undoStack.slice(mark));
+      if (done.lines.length) UI.recDone = done;
+      saveUI();
+    } finally { UI.recBusy = false; }
+    render();
+  }
+  // what YNABB did on its own, said plainly, with one button to take it all back
+  function recDoneCard() {
+    const d = UI.recDone;
+    if (!d || !D.accounts[d.acct] || !d.lines.length) return '';
+    return `<div class="rc-did"><header><b>What YNABB sorted out in ${esc(acctName(d.acct))}</b><button class="rb-x" data-action="rec-done-x" aria-label="Close" title="Close">&times;</button></header>
+      <ul>${d.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+      <button class="btn sm" data-action="rec-done-undo">Undo all of this</button></div>`;
+  }
+  async function recDoneUndo() {
+    const d = UI.recDone;
+    if (!d) return;
+    // only YNABB's own steps, newest first; anything you changed since stays
+    const mine = new Set(d.groups), top = () => S.undoStack[S.undoStack.length - 1];
+    while (S.undoStack.length && mine.has(top())) { mine.delete(top()); S.undo(); }
+    // put back as it was, and leave it for you to sort out by hand: no doing it all again
+    UI.recNoAuto = Object.assign({}, UI.recNoAuto, { [d.acct]: true });
+    UI.recDone = null; saveUI();
+    toast(mine.size ? "Put back what it could. You've changed things since, so use ⌘Z to step back further." : "Put back how it was. YNABB won't fix this account for you again until you reload the page.");
+    render();
   }
   // a tracking account's new value: the gap is gains or losses, so it goes in as one adjustment, like YNAB.
   // Everything up to today is locked in, as there's no bank file to match it against.
@@ -2019,7 +2175,7 @@
     const selBtns = isPhone()
       ? (UI.pick ? `${list.length > 1 ? `<button class="btn sm" data-action="select-all">All ${list.length}</button>` : ''}<button class="btn sm primary" data-action="pick-mode">Done</button>` : '<button class="btn sm" data-action="pick-mode">Select</button>')
       : list.length > 1 && (activeFilters || UI.q || UI.only) ? `<button class="btn sm" data-action="select-all" title="${MAC ? '⌘' : 'Ctrl+'}A">Select all ${list.length}</button>` : '';
-    return `${acctBalanceHead()}${uncatBar}
+    return `${acctBalanceHead()}${recDoneCard()}${uncatBar}
       <div class="tx-tools">
         <div class="tools-l">
           <button class="btn sm primary" data-action="add-tx" aria-label="Add a transaction">${ICON.plus}<span class="add-lbl"> Add</span></button>
@@ -4130,6 +4286,8 @@
     'clear-only': () => { UI.only = null; render(); },
     'acct-pick': (el) => { if (UI.bc) UI.bc = el.dataset.id ? { acct: el.dataset.id, step: null } : null; UI.f = Object.assign({}, UI.f, { acct: el.dataset.id, from: UI.bc ? bcSince(el.dataset.id) : UI.f.from, to: UI.bc ? '' : UI.f.to }); UI.only = null; UI.limit = 150; UI.editTx = null; UI.sel = null; saveUI(); render(); },
     'tx-sort': (el) => { const k = el.dataset.k; UI.sort = UI.sort.k === k ? { k, dir: -UI.sort.dir } : { k, dir: k === 'date' || k === 'amt' ? -1 : 1 }; render(); },
+    'rec-done-x': () => { UI.recDone = null; render(); },
+    'rec-done-undo': () => recDoneUndo(),
     'bank-check': () => { const a = UI.rec && UI.rec.acct; UI.rec = null; openBankCheck(a); },
     'bc-close': () => { if (UI.bc && UI.bc.find != null) UI.q = ''; UI.bc = null; UI.f.from = ''; UI.f.to = ''; render(); },
     'bc-step': (el) => {
@@ -4140,7 +4298,7 @@
     'bc-fix': (el) => bcFix(UI.bc.acct, el.dataset.k === '' ? null : Number(el.dataset.k)),
     'bc-lock': () => bcLock(UI.bc.acct),
     'bc-add': async (el) => {
-      const acct = UI.bc.acct, desc = el.dataset.desc, rule = ruleFor(desc, Number(el.dataset.amt), acct, el.dataset.d);
+      const acct = (UI.bc || UI.rec).acct, desc = el.dataset.desc, rule = ruleFor(desc, Number(el.dataset.amt), acct, el.dataset.d);
       const t = { id: S.uid(), acct, date: el.dataset.d, amt: Number(el.dataset.amt), bank: desc, payee: rule && rule.payee ? rule.payee : tidyPayee(desc), cat: rule ? rule.cat || null : null, memo: rule && rule.memo ? rule.memo : null, cleared: 'c', approved: false, by: myId() };
       S.newStep(); await putTxs([t]); S.newStep();
       toast(`Added ${t.payee} ${signed(t.amt)} on ${dateLabel(t.date)}${t.cat ? '' : '. Give it a category in Needs review'}. ${MAC ? '⌘Z' : 'Ctrl+Z'} to undo.`);
