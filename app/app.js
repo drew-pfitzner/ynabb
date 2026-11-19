@@ -243,17 +243,24 @@
     }
   }
   // ynabb…/#add opens straight to a new transaction: for a phone's Action button or a Home Screen shortcut,
-  // so a purchase and its receipt go in at the checkout
+  // so a purchase and its receipt go in at the checkout. #add?total=45.20&shop=Kmart&date=2026-11-19 fills
+  // those in too (an iPhone Shortcut that asked for them once, to name the receipt file), so nothing's typed twice.
+  const isAddLink = () => /^#add(\?|$)/.test(location.hash);
   function addFromLink() {
-    if (location.hash !== '#add') return;
+    if (!isAddLink()) return;
+    const q = new URLSearchParams(location.hash.split('?')[1] || '');
     history.replaceState(null, '', location.pathname + location.search); // once only, not again on refresh
+    const fill = {}, total = Number(String(q.get('total') || '').replace(/[$,\s]/g, ''));
+    if (Number.isFinite(total) && total) fill.amt = -Math.round(Math.abs(total) * 100); // a purchase: money out
+    if (q.get('shop')) fill.payee = q.get('shop').trim().slice(0, 80);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(q.get('date') || '') && !Number.isNaN(Date.parse(q.get('date')))) fill.date = q.get('date');
     UI.view = 'tx'; saveUI(); render(); // a reconcile you're part way through stays as it was
-    openTx(null);
+    openTx(null, fill);
   }
   window.addEventListener('hashchange', () => { if (S.ready()) addFromLink(); });
   function render() {
     if (!S.ready()) { renderChrome(); view().innerHTML = '<p class="loading">Loading your budget…</p>'; return; }
-    if (location.hash === '#add') setTimeout(addFromLink, 0);
+    if (isAddLink()) setTimeout(addFromLink, 0);
     const a = document.activeElement;
     const inView = a && view().contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName);
     // don't wipe out something the person is in the middle of typing; render once they leave the field.
@@ -2477,12 +2484,14 @@
   }
 
   // transaction editor
-  function openTx(t) {
+  // fill: what a new one starts with (from the #add link)
+  function openTx(t, fill) {
     const isNew = !t;
     const acctIds = Object.keys(D.accounts).filter((k) => !D.accounts[k].closed);
     if (isNew && !acctIds.length) { toast('Add an account first.'); UI.view = 'accounts'; saveUI(); render(); return; }
     const lastAcct = (() => { try { return localStorage.getItem('zeroline-last-acct'); } catch (e) { return null; } })();
     t = t ? Object.assign({}, t) : { id: S.uid(), acct: (UI.f.acct && D.accounts[UI.f.acct]) ? UI.f.acct : (lastAcct && D.accounts[lastAcct] ? lastAcct : acctIds[0]), date: E.todayISO(), payee: '', cat: null, amt: 0, bank: '', memo: '', cleared: 'u', by: myId() };
+    if (isNew && fill) Object.assign(t, fill);
     const orig = isNew ? null : D.txById[t.id];
     let splits = t.splits && t.splits.length ? t.splits.map((p) => Object.assign({}, p)) : null;
     let dir = t.amt > 0 ? 'in' : 'out';
